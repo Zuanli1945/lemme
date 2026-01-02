@@ -1,12 +1,13 @@
 -- ========================================
--- MIDNIGHT CHASERS FARM SCRIPT - ENHANCED
--- Refactored with improved structure and brutal features
+-- MIDNIGHT CHASERS FARM SCRIPT - ENHANCED & FIXED
+-- Fixed delivery issues and added draggable GUI
 -- ========================================
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local VirtualUser = game:GetService("VirtualUser")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local LocalPlayer = Players.LocalPlayer
 
@@ -25,13 +26,12 @@ local Config = {
         Fast = 500,
         Normal = 300,
         Slow = 150,
-        Approach = 20
+        Approach = 35  -- Saya naikkan dari 20 ke 35 untuk lebih stabil
     }
 }
 
 -- ========================================
 -- STREAMING OPTIMIZATION
--- Saya menambahkan optimisasi streaming untuk memuat area map lebih cepat
 -- ========================================
 local function initializeStreaming()
     task.spawn(function()
@@ -42,7 +42,7 @@ local function initializeStreaming()
                         LocalPlayer:RequestStreamAroundAsync(model.WorldPivot.Position, Config.StreamRadius)
                     end)
                 end)
-                task.wait(0.01) -- Sedikit delay agar tidak overload
+                task.wait(0.01)
             end
         end
         print("[STREAMING] All areas loaded")
@@ -51,7 +51,6 @@ end
 
 -- ========================================
 -- ANTI-AFK SYSTEM
--- Sistem ini mencegah kick karena idle
 -- ========================================
 local function setupAntiAFK()
     LocalPlayer.Idled:Connect(function()
@@ -66,7 +65,6 @@ end
 
 -- ========================================
 -- GIFT DETECTION
--- Menghitung apakah sudah mencapai maksimum gift
 -- ========================================
 local function hasReachedMaxGifts(vehicle)
     local seatCount = 0
@@ -87,7 +85,6 @@ end
 
 -- ========================================
 -- WORKSPACE MANAGEMENT
--- Menyembunyikan objek untuk performa lebih baik
 -- ========================================
 local BackupFolder
 
@@ -127,27 +124,40 @@ local function restoreWorkspaceObjects()
 end
 
 -- ========================================
--- GROUND CREATION
--- Membuat ground platform untuk tweening yang smooth
+-- IMPROVED GROUND CREATION
+-- FIX: Ground part sekarang lebih besar dan lebih stabil
 -- ========================================
 local GroundPart
 
 local function ensureGroundPart()
-    if not GroundPart then
+    if not GroundPart or not GroundPart.Parent then
+        -- Hapus ground part lama jika ada
+        if GroundPart then
+            GroundPart:Destroy()
+        end
+        
+        -- Buat ground part baru yang lebih besar dan lebih reliable
         GroundPart = Instance.new("Part")
         GroundPart.Name = "FarmGroundPlatform"
         GroundPart.Anchored = true
-        GroundPart.Size = Vector3.new(15000, 10, 15000)
+        GroundPart.Size = Vector3.new(20000, 15, 20000)  -- Lebih besar untuk coverage lebih baik
         GroundPart.Transparency = 1
-        GroundPart.CanCollide = false
+        GroundPart.CanCollide = true  -- Saya ubah jadi true agar kendaraan punya surface untuk berdiri
+        GroundPart.Material = Enum.Material.SmoothPlastic
         GroundPart.Parent = workspace
-        print("[GROUND] Platform created")
+        
+        -- Tambahkan BodyPosition untuk memastikan ground tetap stabil
+        local bodyPos = Instance.new("BodyPosition")
+        bodyPos.MaxForce = Vector3.new(0, 0, 0)  -- Tidak aktif secara default
+        bodyPos.Parent = GroundPart
+        
+        print("[GROUND] Enhanced platform created with improved stability")
     end
+    return GroundPart
 end
 
 -- ========================================
--- NOCLIP FEATURE (BRUTAL ADDITION)
--- Membuat karakter bisa menembus dinding
+-- NOCLIP FEATURE
 -- ========================================
 local NoClipConnection
 
@@ -158,7 +168,7 @@ local function toggleNoClip(enabled)
     end
     
     if enabled then
-        NoClipConnection = game:GetService("RunService").Stepped:Connect(function()
+        NoClipConnection = RunService.Stepped:Connect(function()
             if LocalPlayer.Character then
                 for _, part in pairs(LocalPlayer.Character:GetDescendants()) do
                     if part:IsA("BasePart") then
@@ -174,8 +184,7 @@ local function toggleNoClip(enabled)
 end
 
 -- ========================================
--- INFINITE JUMP (BRUTAL ADDITION)
--- Membuat bisa jump tanpa batas
+-- INFINITE JUMP
 -- ========================================
 local InfiniteJumpConnection
 
@@ -198,8 +207,7 @@ local function toggleInfiniteJump(enabled)
 end
 
 -- ========================================
--- TWEEN SYSTEM
--- System untuk movement yang smooth menggunakan tweening
+-- IMPROVED TWEEN SYSTEM FOR AUTO FARM
 -- ========================================
 local ActiveTween
 local TweenCancelled = false
@@ -210,6 +218,8 @@ local function tweenVehicleToPosition(vehicle, targetCFrame, speed)
     end
     
     TweenCancelled = false
+    ensureGroundPart()  -- Pastikan ground part ada sebelum mulai tween
+    
     local distance = (vehicle.PrimaryPart.Position - targetCFrame.Position).Magnitude
     local duration = distance / speed
     
@@ -218,8 +228,13 @@ local function tweenVehicleToPosition(vehicle, targetCFrame, speed)
     
     tweenValue.Changed:Connect(function()
         if TweenCancelled then return end
+        if not GroundPart or not GroundPart.Parent then
+            ensureGroundPart()
+        end
         
         local currentPos = tweenValue.Value.Position
+        
+        -- Update ground position dengan smooth interpolation
         GroundPart.Position = currentPos - Vector3.new(0, 14, 0)
         
         -- Posisikan kendaraan di atas ground dan arahkan ke target
@@ -247,38 +262,57 @@ local function tweenVehicleToPosition(vehicle, targetCFrame, speed)
     ActiveTween.Completed:Wait()
 end
 
+-- ========================================
+-- DRAMATICALLY IMPROVED DELIVERY SYSTEM
+-- FIX: Sistem baru dengan logika yang lebih smooth dan reliable
+-- ========================================
+local DeliveryConnection
+
 local function tweenToDeliveryLocation(vehicle, targetModel)
+    -- Cancel tween sebelumnya jika ada
     if ActiveTween then
         ActiveTween:Cancel()
     end
     
+    -- Disconnect connection lama jika ada
+    if DeliveryConnection then
+        DeliveryConnection:Disconnect()
+        DeliveryConnection = nil
+    end
+    
     TweenCancelled = false
-    local targetCFrame = targetModel.WorldPivot + Vector3.new(0, 5, 0)
-    local distance = (vehicle.PrimaryPart.Position - targetCFrame.Position).Magnitude
-    local speed = Config.Speed
+    ensureGroundPart()  -- Pastikan ground part ada dan valid
     
-    local duration = distance / speed
-    local tweenValue = Instance.new("CFrameValue")
-    tweenValue.Value = vehicle:GetPrimaryPartCFrame()
+    local targetCFrame = targetModel.WorldPivot + Vector3.new(0, 8, 0)  -- Saya naikkan dari 5 ke 8 untuk clearance lebih baik
+    local startDistance = (vehicle.PrimaryPart.Position - targetCFrame.Position).Magnitude
     
-    tweenValue.Changed:Connect(function()
-        if TweenCancelled then return end
+    print("[DELIVERY] Starting delivery, distance: " .. math.floor(startDistance) .. " studs")
+    
+    -- Fase 1: Tween untuk jarak jauh (lebih dari 100 studs)
+    if startDistance > 100 then
+        local speed = Config.Speed
+        local duration = startDistance / speed
         
-        local currentPos = tweenValue.Value.Position
-        local distanceToTarget = LocalPlayer:DistanceFromCharacter(targetCFrame.Position)
+        local tweenValue = Instance.new("CFrameValue")
+        tweenValue.Value = vehicle:GetPrimaryPartCFrame()
         
-        if distanceToTarget > 100 then
-            -- Jauh dari target: kecepatan penuh
-            GroundPart.Position = currentPos - Vector3.new(0, 14, 0)
-            vehicle:PivotTo(CFrame.new(
-                GroundPart.Position + Vector3.new(0, 7, 0),
-                targetCFrame.Position
-            ))
-            vehicle.PrimaryPart.AssemblyLinearVelocity = vehicle.PrimaryPart.CFrame.LookVector * speed
+        local updateConnection
+        updateConnection = tweenValue.Changed:Connect(function()
+            if TweenCancelled or not Config.AutoDeliver then 
+                if updateConnection then updateConnection:Disconnect() end
+                return 
+            end
             
-        elseif distanceToTarget > 10 then
-            -- Mendekat: perlambat
-            if not TweenCancelled then
+            -- Pastikan ground part masih ada
+            if not GroundPart or not GroundPart.Parent then
+                ensureGroundPart()
+            end
+            
+            local currentPos = tweenValue.Value.Position
+            local currentDistance = (currentPos - targetCFrame.Position).Magnitude
+            
+            -- Jika sudah dekat, cancel tween dan switch ke fase 2
+            if currentDistance <= 100 then
                 TweenCancelled = true
                 if ActiveTween then ActiveTween:Cancel() end
     if DeliveryConnection then DeliveryConnection:Disconnect() end
@@ -304,38 +338,141 @@ print("[INFO] GUI is now draggable - click and drag to move it!")
 print("[FIX] Delivery system completely rewritten for stability")
 print("===========================================")
 d
+                if updateConnection then updateConnection:Disconnect() end
+                return
             end
             
-            GroundPart.Position = currentPos - Vector3.new(0, 8, 0)
+            -- Update ground position dengan offset yang konsisten
+            GroundPart.CFrame = CFrame.new(currentPos - Vector3.new(0, 14, 0))
+            
+            -- Posisikan kendaraan dengan rotasi yang smooth
+            local lookDirection = (targetCFrame.Position - currentPos).Unit
+            local newCFrame = CFrame.new(
+                GroundPart.Position + Vector3.new(0, 7, 0),
+                GroundPart.Position + Vector3.new(0, 7, 0) + lookDirection
+            )
+            
+            vehicle:PivotTo(newCFrame)
+            vehicle.PrimaryPart.AssemblyLinearVelocity = vehicle.PrimaryPart.CFrame.LookVector * speed
+        end)
+        
+        local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut)
+        ActiveTween = TweenService:Create(tweenValue, tweenInfo, { Value = targetCFrame })
+        ActiveTween:Play()
+        
+        -- Wait sampai tween selesai atau di-cancel
+        repeat task.wait(0.03)
+        until TweenCancelled or not Config.AutoDeliver or 
+              ActiveTween.PlaybackState == Enum.PlaybackState.Completed or
+              not targetModel:FindFirstChild("Highlight")
+        
+        if updateConnection then updateConnection:Disconnect() end
+    end
+    
+    -- Fase 2: Approach perlahan untuk jarak menengah (15-100 studs)
+    -- FIX: Saya tambahkan fase ini untuk transisi yang lebih smooth
+    print("[DELIVERY] Entering approach phase")
+    
+    DeliveryConnection = RunService.Heartbeat:Connect(function()
+        if not Config.AutoDeliver or not targetModel:FindFirstChild("Highlight") then
+            if DeliveryConnection then 
+                DeliveryConnection:Disconnect() 
+                DeliveryConnection = nil
+            end
+            return
+        end
+        
+        -- Pastikan ground part masih ada
+        if not GroundPart or not GroundPart.Parent then
+            ensureGroundPart()
+        end
+        
+        local currentDistance = LocalPlayer:DistanceFromCharacter(targetCFrame.Position)
+        
+        if currentDistance > 15 then
+            -- Masih di fase approach (15-100 studs): gerak perlahan tapi controlled
+            local currentPos = vehicle.PrimaryPart.Position
+            
+            -- Update ground dengan smooth positioning
+            local targetGroundPos = Vector3.new(currentPos.X, currentPos.Y - 10, currentPos.Z)
+            GroundPart.CFrame = CFrame.new(targetGroundPos)
+            
+            -- Hitung direction ke target (hanya horizontal, ignore Y axis untuk lebih stabil)
+            local horizontalTarget = Vector3.new(targetCFrame.X, currentPos.Y, targetCFrame.Z)
+            local direction = (horizontalTarget - currentPos).Unit
+            
+            -- Posisikan kendaraan menghadap target dengan smooth rotation
+            local newCFrame = CFrame.new(
+                GroundPart.Position + Vector3.new(0, 7, 0),
+                GroundPart.Position + Vector3.new(0, 7, 0) + direction
+            )
+            
+            vehicle:PivotTo(newCFrame)
+            
+            -- Set velocity dengan kecepatan approach yang lebih tinggi dan stabil
+            vehicle.PrimaryPart.AssemblyLinearVelocity = direction * Config.TweenSpeed.Approach
+            
+        elseif currentDistance <= 15 and currentDistance > 3 then
+            -- Fase final approach (3-15 studs): super slow dan precise
+            local currentPos = vehicle.PrimaryPart.Position
+            
+            -- Lock ground position untuk stabilitas maksimal
+            local targetGroundPos = Vector3.new(currentPos.X, currentPos.Y - 8, currentPos.Z)
+            GroundPart.CFrame = CFrame.new(targetGroundPos)
+            
+            -- Hitung direction (horizontal only)
+            local horizontalTarget = Vector3.new(targetCFrame.X, currentPos.Y, targetCFrame.Z)
+            local direction = (horizontalTarget - currentPos).Unit
+            
+            -- Posisikan dengan precision tinggi
             vehicle:PivotTo(CFrame.new(
                 GroundPart.Position + Vector3.new(0, 7, 0),
-                Vector3.new(targetCFrame.X, vehicle.PrimaryPart.CFrame.Y, targetCFrame.Z)
+                GroundPart.Position + Vector3.new(0, 7, 0) + direction
             ))
-            vehicle.PrimaryPart.AssemblyLinearVelocity = vehicle.PrimaryPart.CFrame.LookVector * Config.TweenSpeed.Approach
+            
+            -- Velocity sangat lambat untuk precision
+            vehicle.PrimaryPart.AssemblyLinearVelocity = direction * 15
             
         else
-            -- Sampai di target: stop
-            local lookAt = vehicle.PrimaryPart.CFrame * CFrame.new(0, 0, -10000)
-            vehicle:PivotTo(CFrame.new(
-                Vector3.new(targetCFrame.X, GroundPart.CFrame.Y + 7, targetCFrame.Z),
-                lookAt.Position
-            ))
+            -- Sudah sampai di target (kurang dari 3 studs): STOP
+            print("[DELIVERY] Arrived at destination!")
+            
+            -- Lock posisi final
+            local finalGroundPos = Vector3.new(targetCFrame.X, targetCFrame.Y - 8, targetCFrame.Z)
+            GroundPart.CFrame = CFrame.new(finalGroundPos)
+            
+            -- Stop kendaraan sepenuhnya
             vehicle.PrimaryPart.AssemblyLinearVelocity = Vector3.zero
+            vehicle.PrimaryPart.AssemblyAngularVelocity = Vector3.zero
+            
+            -- Posisikan tepat di target
+            vehicle:PivotTo(CFrame.new(
+                Vector3.new(targetCFrame.X, GroundPart.CFrame.Y + 7, targetCFrame.Z)
+            ))
+            
+            -- Disconnect karena sudah sampai
+            if DeliveryConnection then
+                DeliveryConnection:Disconnect()
+                DeliveryConnection = nil
+            end
         end
     end)
     
-    local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut)
-    ActiveTween = TweenService:Create(tweenValue, tweenInfo, { Value = targetCFrame })
-    ActiveTween:Play()
+    -- Wait sampai highlight hilang (delivery complete) atau user stop
+    repeat task.wait(0.1)
+    until not targetModel:FindFirstChild("Highlight") or not Config.AutoDeliver
     
-    repeat task.wait()
-    until not targetModel:FindFirstChild("Highlight") or not Config.AutoDeliver or 
-          ActiveTween.PlaybackState == Enum.PlaybackState.Completed
+    -- Cleanup connection
+    if DeliveryConnection then
+        DeliveryConnection:Disconnect()
+        DeliveryConnection = nil
+    end
+    
+    print("[DELIVERY] Delivery phase completed")
 end
 
 -- ========================================
 -- AUTO FARM LOGIC
--- Main logic untuk farming otomatis
 -- ========================================
 local FarmWaypoints = {
     CFrame.new(105.419128, -26.0098934, 7965.37988, -3.36170197e-05, 0.951051414, -0.309032798, -1, -3.36170197e-05, 5.31971455e-06, -5.31971455e-06, 0.309032798, 0.951051414),
@@ -366,7 +503,6 @@ local function startAutoFarm()
         local vehicle = humanoid.SeatPart.Parent
         ensureGroundPart()
         
-        -- Set primary part untuk pivot
         vehicle.PrimaryPart = vehicle.Body:FindFirstChild("#Weight") or vehicle.PrimaryPart
         
         print("[AUTO FARM] Starting route with " .. #FarmWaypoints .. " waypoints")
@@ -385,8 +521,7 @@ local function startAutoFarm()
 end
 
 -- ========================================
--- AUTO DELIVER LOGIC
--- Logic untuk deliver gift secara otomatis
+-- IMPROVED AUTO DELIVER LOGIC
 -- ========================================
 local function findNearestDeliveryLocation()
     local nearestLocation = nil
@@ -418,7 +553,8 @@ local function startAutoDeliver()
         local humanoid = character:FindFirstChildOfClass("Humanoid")
         if not humanoid or not humanoid.SeatPart then
             warn("[AUTO DELIVER] Not in a vehicle!")
-            break
+            task.wait(2)
+            continue
         end
         
         local vehicle = humanoid.SeatPart.Parent
@@ -430,14 +566,39 @@ local function startAutoDeliver()
         if deliveryLocation then
             print("[AUTO DELIVER] Found delivery location, moving...")
             tweenToDeliveryLocation(vehicle, deliveryLocation)
+            task.wait(0.5)  -- Delay setelah delivery selesai
             
         elseif workspace:FindFirstChild("GiftPickup") then
             print("[AUTO DELIVER] Moving to gift pickup point")
+            
+            -- Improved pickup logic dengan positioning yang lebih baik
+            local pickupPos = workspace.GiftPickup.WorldPivot.Position
+            local approachCFrame = CFrame.new(pickupPos + Vector3.new(0, 8, 0))
+            
+            -- Approach ke pickup point
+            local distance = (vehicle.PrimaryPart.Position - approachCFrame.Position).Magnitude
+            if distance > 10 then
+                tweenVehicleToPosition(vehicle, approachCFrame, Config.Speed * 0.7)
+            end
+            
+            -- Stay di pickup point sambil loading gifts
             repeat
-                task.wait()
+                task.wait(0.1)
+                
+                if not GroundPart or not GroundPart.Parent then
+                    ensureGroundPart()
+                end
+                
+                -- Lock position di pickup point
+                GroundPart.CFrame = CFrame.new(pickupPos - Vector3.new(0, 8, 0))
+                vehicle:PivotTo(CFrame.new(GroundPart.Position + Vector3.new(0, 7, 0)))
                 vehicle.PrimaryPart.AssemblyLinearVelocity = Vector3.zero
-                vehicle:PivotTo(CFrame.new(workspace.GiftPickup.WorldPivot.Position) + Vector3.new(0, 5, 0))
-            until hasReachedMaxGifts(vehicle) or not Config.AutoDeliver
+                vehicle.PrimaryPart.AssemblyAngularVelocity = Vector3.zero
+                
+            until hasReachedMaxGifts(vehicle) or not Config.AutoDeliver or not workspace:FindFirstChild("GiftPickup")
+            
+            print("[AUTO DELIVER] Gifts loaded, ready for delivery")
+            task.wait(0.5)
             
         else
             warn("[AUTO DELIVER] No delivery locations or pickup points found")
@@ -447,13 +608,71 @@ local function startAutoDeliver()
 end
 
 -- ========================================
--- GUI CREATION
--- Membuat GUI yang lebih brutal dengan fitur lengkap
+-- DRAGGABLE GUI SYSTEM
+-- Sistem baru untuk membuat GUI bisa di-drag
+-- ========================================
+local function makeDraggable(gui)
+    local dragging = false
+    local dragInput, mousePos, framePos
+    
+    gui.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            mousePos = input.Position
+            framePos = gui.Position
+            
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+    
+    gui.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement then
+            dragInput = input
+        end
+    end)
+    
+    game:GetService("UserInputService").InputChanged:Connect(function(input)
+        if input == dragInput and dragging then
+            local delta = input.Position - mousePos
+            gui.Position = UDim2.new(
+                framePos.X.Scale,
+                framePos.X.Offset + delta.X,
+                framePos.Y.Scale,
+                framePos.Y.Offset + delta.Y
+            )
+        end
+    end)
+end
+
+-- ========================================
+-- GUI CREATION WITH DRAGGABLE FEATURE
 -- ========================================
 local library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Schlabbadabadoo/RandomScripts/refs/heads/main/ui.lua", true))()
 local window = library:CreateWindow({
     text = "🔥 MIDNIGHT CHASERS BRUTAL FARM 🔥"
 })
+
+-- Buat GUI bisa di-drag
+-- Library mungkin sudah punya sistem draggable, tapi kita tambahkan sendiri untuk memastikan
+task.spawn(function()
+    task.wait(0.5)  -- Wait untuk GUI fully loaded
+    
+    -- Cari main frame dari GUI
+    local playerGui = LocalPlayer:WaitForChild("PlayerGui")
+    for _, gui in pairs(playerGui:GetDescendants()) do
+        if gui:IsA("Frame") and gui.Name:find("Main") or gui.Name:find("Window") then
+            pcall(function()
+                makeDraggable(gui)
+                print("[GUI] Draggable system enabled - you can now drag the GUI!")
+            end)
+            break
+        end
+    end
+end)
 
 -- Speed Control
 window:AddBox("Vehicle Speed (Default: 300)", function(object, focus)
@@ -476,6 +695,7 @@ window:AddToggle("Auto Farm", function(state)
     else
         print("[AUTO FARM] Stopped")
         if ActiveTween then ActiveTween:Cancel() end
+        if DeliveryConnection then DeliveryConnection:Disconnect() end
         restoreWorkspaceObjects()
     end
 end)
@@ -490,17 +710,18 @@ window:AddToggle("Auto Deliver [Event]", function(state)
     else
         print("[AUTO DELIVER] Stopped")
         if ActiveTween then ActiveTween:Cancel() end
+        if DeliveryConnection then DeliveryConnection:Disconnect() end
         restoreWorkspaceObjects()
     end
 end)
 
--- NoClip Toggle (BRUTAL FEATURE)
+-- NoClip Toggle
 window:AddToggle("NoClip (Pass Through Walls)", function(state)
     Config.NoClip = state
     toggleNoClip(state)
 end)
 
--- Infinite Jump Toggle (BRUTAL FEATURE)
+-- Infinite Jump Toggle
 window:AddToggle("Infinite Jump", function(state)
     Config.InfiniteJump = state
     toggleInfiniteJump(state)
@@ -520,24 +741,4 @@ window:AddButton("⛔ EMERGENCY STOP ALL", function()
     Config.NoClip = false
     Config.InfiniteJump = false
     
-    if ActiveTween then ActiveTween:Cancel() end
-    toggleNoClip(false)
-    toggleInfiniteJump(false)
-    restoreWorkspaceObjects()
-    
-    print("[EMERGENCY] All features stopped!")
-end)
-
--- ========================================
--- INITIALIZATION
--- ========================================
-print("===========================================")
-print("MIDNIGHT CHASERS BRUTAL FARM - INITIALIZED")
-print("===========================================")
-
-initializeStreaming()
-setupAntiAFK()
-
-print("[READY] Script loaded successfully!")
-print("[INFO] Use the GUI to control features")
-print("===========================================")
+    if ActiveTween then ActiveTween:Cancel() en
