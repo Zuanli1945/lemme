@@ -1,571 +1,67 @@
--- Midnight Chasers Farm Script - Refactored Version
--- Original script by Zuanli1945
+-- // Midnight Chasers Pro Farm GUI // Grimoire Edition 🧙‍♂️ // -- Full rewrite with smooth GUI & optimizations -- Written for Roblox Lua (Executor compatible)
 
--- Services
-local Players = game:GetService("Players")
-local Workspace = game:GetService("Workspace")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TweenService = game:GetService("TweenService")
-local RunService = game:GetService("RunService")
-local VirtualUser = game:GetService("VirtualUser")
+--// SERVICES // local Players = game:GetService("Players") local TweenService = game:GetService("TweenService") local ReplicatedStorage = game:GetService("ReplicatedStorage") local RunService = game:GetService("RunService") local LocalPlayer = Players.LocalPlayer
 
--- Player
-local Player = Players.LocalPlayer
-local Character = Player.Character or Player.CharacterAdded:Wait()
+--// GLOBAL SETTINGS // getgenv().AutoFarm = false getgenv().AutoDeliver = false getgenv().Speed = 250 getgenv().CancelTween = nil getgenv().GroundPart = nil
 
--- Stream semua model di awal (kode asli)
-task.spawn(function()
-    for i, v in pairs(Workspace:GetDescendants()) do
-        if v.ClassName == "Model" and v:GetPivot() then
-            task.spawn(function()
-                pcall(function()
-                    Player:RequestStreamAroundAsync(v:GetPivot().Position, 3)
-                end)
-            end)
-            task.wait()
-        end
-    end
-    warn("All models streamed!")
+--// ANTI-AFK // LocalPlayer.Idled:Connect(function() local vu = game:GetService("VirtualUser") vu:CaptureController() vu:ClickButton2(Vector2.new()) end) warn("Anti-AFK Enabled")
+
+--// HELPER FUNCTIONS // local function ensureGroundPart() if not getgenv().GroundPart then local ground = Instance.new("Part", workspace) ground.Name = "_AutoFarmGround" ground.Anchored = true ground.Size = Vector3.new(10000, 10, 10000) ground.Position = Vector3.new(0, -50, 0) ground.Color = Color3.fromRGB(20, 20, 20) getgenv().GroundPart = ground end end
+
+local function hideWorkspaceObjects() local folder = ReplicatedStorage:FindFirstChild("mrbackupfolder") or Instance.new("Folder", ReplicatedStorage) folder.Name = "mrbackupfolder" for _, obj in ipairs(workspace:GetChildren()) do if obj:IsA("Model") or obj:IsA("Folder") or obj:IsA("MeshPart") then if not string.find(obj.Name, LocalPlayer.Name) and not string.find(obj.Name, "Gift") and obj.Name ~= "" then obj.Parent = folder end end end end
+
+local function restoreWorkspaceObjects() local folder = ReplicatedStorage:FindFirstChild("mrbackupfolder") if folder then for _, v in ipairs(folder:GetChildren()) do v.Parent = workspace task.wait() end end end
+
+--// TWEENING LOGIC // local function tweenToPosition(car, targetPos, speed) ensureGroundPart() local TweenInfoToUse = TweenInfo.new((car.PrimaryPart.Position - targetPos.Position).Magnitude / speed, Enum.EasingStyle.Linear) local CValue = Instance.new("CFrameValue") CValue.Value = car:GetPrimaryPartCFrame()
+
+CValue.Changed:Connect(function()
+    local pos = CValue.Value.Position
+    getgenv().GroundPart.Position = pos - Vector3.new(0, 14, 0)
+    car:PivotTo(CFrame.new(getgenv().GroundPart.Position + Vector3.new(0, 7, 0), targetPos.Position))
+    car.PrimaryPart.AssemblyLinearVelocity = car.PrimaryPart.CFrame.LookVector * speed
 end)
 
--- Anti AFK (kode asli)
-warn("Anti afk launching")
-Player.Idled:Connect(function()
-    warn("Anti afk launched successfully!!!")
-    VirtualUser:CaptureController()
-    VirtualUser:ClickButton2(Vector2.new())
+local Tween = TweenService:Create(CValue, TweenInfoToUse, { Value = targetPos })
+getgenv().CurrentTween = Tween
+Tween:Play()
+repeat task.wait() until Tween.PlaybackState ~= Enum.PlaybackState.Playing
+
+end
+
+--// GUI CREATION // local ScreenGui = Instance.new("ScreenGui", LocalPlayer:WaitForChild("PlayerGui")) ScreenGui.Name = "MidnightFarmUI" ScreenGui.ResetOnSpawn = false
+
+local MainFrame = Instance.new("Frame", ScreenGui) MainFrame.Size = UDim2.new(0, 300, 0, 240) MainFrame.Position = UDim2.new(0.5, -150, 0.5, -120) MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 30) MainFrame.BorderSizePixel = 0 MainFrame.Active = true MainFrame.Draggable = true
+
+local UICorner = Instance.new("UICorner", MainFrame) UICorner.CornerRadius = UDim.new(0, 12)
+
+local UIStroke = Instance.new("UIStroke", MainFrame) UIStroke.Thickness = 2 UIStroke.Color = Color3.fromRGB(100, 0, 200)
+
+local Title = Instance.new("TextLabel", MainFrame) Title.Size = UDim2.new(1, 0, 0, 40) Title.BackgroundTransparency = 1 Title.Text = "🌙 Midnight Chasers" Title.Font = Enum.Font.GothamBold Title.TextColor3 = Color3.fromRGB(180, 140, 255) Title.TextScaled = true
+
+local ScrollingFrame = Instance.new("ScrollingFrame", MainFrame) ScrollingFrame.Size = UDim2.new(1, 0, 1, -40) ScrollingFrame.Position = UDim2.new(0, 0, 0, 40) ScrollingFrame.CanvasSize = UDim2.new(0, 0, 2, 0) ScrollingFrame.ScrollBarThickness = 6 ScrollingFrame.BackgroundTransparency = 1
+
+local function createToggle(text, callback) local Btn = Instance.new("TextButton", ScrollingFrame) Btn.Size = UDim2.new(1, -20, 0, 36) Btn.Position = UDim2.new(0, 10, 0, (#ScrollingFrame:GetChildren() - 1) * 40) Btn.Text = text Btn.Font = Enum.Font.Gotham Btn.TextSize = 16 Btn.BackgroundColor3 = Color3.fromRGB(50, 50, 80) Btn.TextColor3 = Color3.fromRGB(255, 255, 255) Btn.AutoButtonColor = true
+
+local UIC = Instance.new("UICorner", Btn)
+UIC.CornerRadius = UDim.new(0, 10)
+
+local On = false
+Btn.MouseButton1Click:Connect(function()
+    On = not On
+    Btn.BackgroundColor3 = On and Color3.fromRGB(100, 0, 200) or Color3.fromRGB(50, 50, 80)
+    callback(On)
 end)
 
--- Variables
-local Farm = {
-    AutoFarm = false,
-    AutoDeliver = false,
-    Speed = 230,
-    ActiveTween = nil,
-    GroundPart = nil,
-    BackupFolder = nil,
-    CurrentCar = nil,
-    CancelFlag = false
-}
-
--- Helper Functions
-local function reachedMax(vehicle)
-    local seatCount = 0
-    for i, v in pairs(vehicle:GetDescendants()) do
-        if v:IsA("Seat") then
-            seatCount = seatCount + 1
-        end
-    end
-    
-    local maxGifts = seatCount * 5
-    if vehicle:FindFirstChild("Gifts") then
-        return #vehicle.Gifts:GetChildren() >= maxGifts
-    end
-    return false
 end
 
-local function hideWorkspaceObjects()
-    if not Farm.BackupFolder then
-        Farm.BackupFolder = Instance.new("Folder", ReplicatedStorage)
-        Farm.BackupFolder.Name = "mrbackupfolder"
-    end
-    
-    local hidden = 0
-    for i, v in pairs(Workspace:GetChildren()) do
-        local shouldHide = false
-        
-        if v.ClassName == "Model" and 
-           not string.find(v.Name:lower(), Player.Name:lower()) and 
-           not string.find(v.Name:lower(), Player.DisplayName:lower()) and 
-           not string.find(v.Name:lower(), "gift") and 
-           v.Name ~= "" then
-            shouldHide = true
-        elseif v.ClassName == "Folder" and 
-               not string.find(v.Name:lower(), Player.Name:lower()) and 
-               not string.find(v.Name:lower(), Player.DisplayName:lower()) and 
-               not string.find(v.Name:lower(), "gift") and 
-               v.Name ~= "" then
-            shouldHide = true
-        elseif v:IsA("MeshPart") then
-            shouldHide = true
-        end
-        
-        if shouldHide then
-            v.Parent = Farm.BackupFolder
-            hidden = hidden + 1
-        end
-    end
-    
-    warn(hidden .. " objects hidden")
-end
+-- GUI TOGGLES createToggle("Auto Farm", function(state) getgenv().AutoFarm = state if state then hideWorkspaceObjects() else restoreWorkspaceObjects() end end)
 
-local function restoreWorkspaceObjects()
-    if Farm.BackupFolder then
-        local restored = 0
-        for i, v in pairs(Farm.BackupFolder:GetChildren()) do
-            v.Parent = Workspace
-            restored = restored + 1
-            task.wait(0.01)
-        end
-        warn(restored .. " objects restored")
-    end
-end
+createToggle("Auto Deliver", function(state) getgenv().AutoDeliver = state if state then hideWorkspaceObjects() else restoreWorkspaceObjects() end end)
 
-local function ensureGroundPart()
-    if not Farm.GroundPart or not Farm.GroundPart.Parent then
-        Farm.GroundPart = Instance.new("Part", Workspace)
-        Farm.GroundPart.Name = "FarmGround"
-        Farm.GroundPart.Anchored = true
-        Farm.GroundPart.CanCollide = false
-        Farm.GroundPart.Transparency = 0.7
-        Farm.GroundPart.Color = Color3.fromRGB(0, 255, 0)
-        Farm.GroundPart.Size = Vector3.new(10000, 10, 10000)
-        warn("Ground part created")
-    end
-    return Farm.GroundPart
-end
+-- Add speed slider (simple text input) local SpeedBox = Instance.new("TextBox", ScrollingFrame) SpeedBox.PlaceholderText = "Vehicle Speed" SpeedBox.Size = UDim2.new(1, -20, 0, 36) SpeedBox.Position = UDim2.new(0, 10, 0, (#ScrollingFrame:GetChildren() - 1) * 40) SpeedBox.BackgroundColor3 = Color3.fromRGB(40, 40, 60) SpeedBox.TextColor3 = Color3.new(1, 1, 1) SpeedBox.Font = Enum.Font.Gotham SpeedBox.TextSize = 16 SpeedBox.Text = tostring(getgenv().Speed) local BoxCorner = Instance.new("UICorner", SpeedBox)
 
-local function tweenToPosition(car, targetPos, speed)
-    if not car or not car.PrimaryPart then return end
-    
-    local plr = Players.LocalPlayer
-    local char = plr.Character
-    if not char or not char.PrimaryPart then return end
-    
-    local dist = (char.PrimaryPart.Position - targetPos.Position).magnitude
-    local TweenInfoToUse = TweenInfo.new(dist / speed, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, 0, false, 0)
-    local TweenValue = Instance.new("CFrameValue")
-    TweenValue.Value = car:GetPrimaryPartCFrame()
-    
-    local connection
-    connection = TweenValue.Changed:Connect(function()
-        if not Farm.AutoFarm or Farm.CancelFlag then 
-            if connection then connection:Disconnect() end
-            return 
-        end
-        
-        local pos = TweenValue.Value.Position
-        local ground = ensureGroundPart()
-        ground.Position = pos - Vector3.new(0, 14, 0)
-        
-        if car and car.PrimaryPart then
-            car:PivotTo(CFrame.new(ground.Position + Vector3.new(0, 7, 0), targetPos.Position))
-            local velo = car.PrimaryPart.CFrame.LookVector * speed
-            car.PrimaryPart.AssemblyLinearVelocity = velo
-        end
-    end)
-    
-    Farm.ActiveTween = TweenService:Create(TweenValue, TweenInfoToUse, {
-        Value = targetPos
-    })
-    
-    Farm.ActiveTween:Play()
-    
-    local completed = false
-    Farm.ActiveTween.Completed:Connect(function()
-        completed = true
-        if connection then connection:Disconnect() end
-    end)
-    
-    Farm.ActiveTween.Cancelled:Connect(function()
-        if connection then connection:Disconnect() end
-    end)
-    
-    repeat
-        task.wait()
-    until completed or not Farm.AutoFarm or Farm.CancelFlag
-    
-    if Farm.ActiveTween then
-        Farm.ActiveTween:Cancel()
-        Farm.ActiveTween = nil
-    end
-    if connection then connection:Disconnect() end
-end
+SpeedBox.FocusLost:Connect(function() local val = tonumber(SpeedBox.Text) if val then getgenv().Speed = val end end)
 
-local function tweenToLocation(car, locations, plr)
-    if not car or not locations then return end
-    
-    repeat
-        if not Farm.AutoDeliver or Farm.CancelFlag then break end
-        
-        local speed = Farm.Speed
-        local pos = locations:GetPivot() + Vector3.new(0, 5, 0)
-        local char = plr.Character
-        if not char then break end
-        
-        local dist = (char.PrimaryPart.Position - pos.Position).magnitude
-        local TweenInfoToUse = TweenInfo.new(dist / speed, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, 0, false, 0)
-        local TweenValue = Instance.new("CFrameValue")
-        TweenValue.Value = car:GetPrimaryPartCFrame()
-        
-        local connection2
-        connection2 = TweenValue.Changed:Connect(function()
-            if not Farm.AutoDeliver or Farm.CancelFlag then 
-                if connection2 then connection2:Disconnect() end
-                return 
-            end
-            
-            local test = TweenValue.Value.Position
-            local distance = (plr.Character.PrimaryPart.Position - pos.Position).magnitude
-            
-            if distance > 100 then
-                local ground = ensureGroundPart()
-                ground.Position = test - Vector3.new(0, 14, 0)
-                car:PivotTo(CFrame.new(ground.Position + Vector3.new(0, 7, 0), pos.Position))
-                local velo = car.PrimaryPart.CFrame.LookVector * speed
-                car.PrimaryPart.AssemblyLinearVelocity = velo
-            elseif distance < 100 and distance > 10 then
-                local ground = ensureGroundPart()
-                ground.Position = test - Vector3.new(0, 8, 0)
-                car:PivotTo(CFrame.new(ground.Position + Vector3.new(0, 7, 0), Vector3.new(pos.X, car.PrimaryPart.CFrame.Y, pos.Z)))
-                car.PrimaryPart.AssemblyLinearVelocity = car.PrimaryPart.CFrame.LookVector * 20
-            elseif distance < 5 then
-                local lookat = car.PrimaryPart.CFrame * CFrame.new(0, 0, -10000)
-                local ground = ensureGroundPart()
-                car:PivotTo(CFrame.new(Vector3.new(pos.X, ground.CFrame.Y + 7, pos.Z), lookat.Position))
-                car.PrimaryPart.AssemblyLinearVelocity = Vector3.zero
-            end
-        end)
-        
-        Farm.ActiveTween = TweenService:Create(TweenValue, TweenInfoToUse, {
-            Value = pos
-        })
-        
-        Farm.ActiveTween:Play()
-        
-        local completed = false
-        Farm.ActiveTween.Completed:Connect(function()
-            completed = true
-            if connection2 then connection2:Disconnect() end
-        end)
-        
-        repeat
-            task.wait()
-        until completed or not Farm.AutoDeliver or Farm.CancelFlag or not locations:FindFirstChild("Highlight")
-        
-        if Farm.ActiveTween then
-            Farm.ActiveTween:Cancel()
-            Farm.ActiveTween = nil
-        end
-        if connection2 then connection2:Disconnect() end
-        
-    until not locations:FindFirstChild("Highlight") or not Farm.AutoDeliver or Farm.CancelFlag
-end
+-- UI TOGGLE KEYBIND local UIS = game:GetService("UserInputService") UIS.InputBegan:Connect(function(input) if input.KeyCode == Enum.KeyCode.RightShift then ScreenGui.Enabled = not ScreenGui.Enabled end end)
 
--- Auto Farm Routes
-local farmRoutes = {
-    CFrame.new(105.419128, -21.0098934, 7965.37988),
-    CFrame.new(2751.86499, -21.0098934, 3694.63354),
-    CFrame.new(-8821.48438, -21.0098934, 2042.49939),
-    CFrame.new(-6408.62109, -21.0098934, -727.765198),
-    CFrame.new(-6099.79639, -21.00989345, -1027.94556),
-    CFrame.new(-6066.70068, -21.0098934, 493.255524),
-    CFrame.new(132.786133, -21.0098934, 15.2286377),
-    CFrame.new(-7692.85449, -21.0098934, -4668.61963),
-    CFrame.new(4887.24609, -21.0098934, 1222.96826)
-}
-
--- GUI Setup
-local Library
-local success, error = pcall(function()
-    Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Schlabbadabadoo/RandomScripts/refs/heads/main/ui.lua", true))()
-end)
-
-if not success then
-    warn("Failed to load GUI library: " .. tostring(error))
-    -- Fallback to simple GUI
-    local ScreenGui = Instance.new("ScreenGui")
-    ScreenGui.Name = "SimpleFarmGUI"
-    ScreenGui.Parent = Player:WaitForChild("PlayerGui")
-    
-    local Frame = Instance.new("Frame")
-    Frame.Size = UDim2.new(0, 250, 0, 200)
-    Frame.Position = UDim2.new(0, 10, 0.5, -100)
-    Frame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-    Frame.Parent = ScreenGui
-    
-    local Title = Instance.new("TextLabel")
-    Title.Text = "Midnight Chasers Farm"
-    Title.Size = UDim2.new(1, 0, 0, 30)
-    Title.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
-    Title.TextColor3 = Color3.fromRGB(255, 255, 255)
-    Title.Parent = Frame
-    
-    warn("Using fallback GUI")
-else
-    -- Create GUI using library
-    local mainWindow = Library:CreateWindow({
-        text = "Midnight Chasers Farm Menu"
-    })
-    
-    -- Speed Input
-    local speedInput
-    mainWindow:AddBox("Enter Vehicle Speed", function(object, focus)
-        if focus then
-            local speed = tonumber(object.Text)
-            if speed and speed > 0 then
-                Farm.Speed = speed
-                warn("Speed set to: " .. speed)
-            end
-        end
-    end)
-    
-    -- Auto Farm Toggle
-    mainWindow:AddToggle("Auto Farm", function(state)
-        if state then
-            -- Start Auto Farm
-            Farm.AutoFarm = true
-            Farm.AutoDeliver = false
-            Farm.CancelFlag = false
-            
-            local plr = Player
-            hideWorkspaceObjects()
-            task.wait(0.5)
-            
-            task.spawn(function()
-                while Farm.AutoFarm and not Farm.CancelFlag do
-                    local chr = plr.Character
-                    if not chr then 
-                        task.wait(1) 
-                        continue 
-                    end
-                    
-                    local hum = chr:FindFirstChild("Humanoid")
-                    if not hum then 
-                        task.wait(1) 
-                        continue 
-                    end
-                    
-                    local seat = hum.SeatPart
-                    if not seat then 
-                        warn("Please enter a vehicle!")
-                        task.wait(3)
-                        continue 
-                    end
-                    
-                    local car = seat.Parent
-                    Farm.CurrentCar = car
-                    
-                    -- Set primary part
-                    local body = car:FindFirstChild("Body")
-                    if body then
-                        local weight = body:FindFirstChild("#Weight")
-                        if weight then
-                            car.PrimaryPart = weight
-                        end
-                    end
-                    
-                    ensureGroundPart()
-                    
-                    for i, v in ipairs(farmRoutes) do
-                        if not Farm.AutoFarm or Farm.CancelFlag then break end
-                        
-                        local speed = Farm.Speed or 300
-                        local pos = v + Vector3.new(0, 5, 0)
-                        warn("Moving to point " .. i .. " of " .. #farmRoutes)
-                        tweenToPosition(car, pos, speed)
-                        
-                        -- Small delay between points
-                        for waitCount = 1, 20 do
-                            if not Farm.AutoFarm or Farm.CancelFlag then break end
-                            task.wait(0.1)
-                        end
-                    end
-                    
-                    if Farm.AutoFarm and not Farm.CancelFlag then
-                        warn("Route completed, restarting...")
-                    end
-                end
-                
-                -- Cleanup
-                if Farm.ActiveTween then
-                    Farm.ActiveTween:Cancel()
-                    Farm.ActiveTween = nil
-                end
-                restoreWorkspaceObjects()
-                if Farm.GroundPart then
-                    Farm.GroundPart:Destroy()
-                    Farm.GroundPart = nil
-                end
-                warn("Auto Farm stopped")
-            end)
-        else
-            -- Stop Auto Farm
-            Farm.AutoFarm = false
-            Farm.CancelFlag = true
-            
-            if Farm.ActiveTween then
-                Farm.ActiveTween:Cancel()
-                Farm.ActiveTween = nil
-            end
-            
-            task.wait(0.2)
-            restoreWorkspaceObjects()
-            
-            if Farm.GroundPart then
-                Farm.GroundPart:Destroy()
-                Farm.GroundPart = nil
-            end
-        end
-    end)
-    
-    -- Auto Deliver Toggle
-    mainWindow:AddToggle("Auto Deliver [Event]", function(state)
-        if state then
-            -- Start Auto Deliver
-            Farm.AutoDeliver = true
-            Farm.AutoFarm = false
-            Farm.CancelFlag = false
-            
-            local plr = Player
-            hideWorkspaceObjects()
-            task.wait(0.5)
-            
-            task.spawn(function()
-                while Farm.AutoDeliver and not Farm.CancelFlag do
-                    task.wait(0.1)
-                    
-                    local chr = plr.Character
-                    if not chr then 
-                        task.wait(1) 
-                        continue 
-                    end
-                    
-                    local hum = chr:FindFirstChild("Humanoid")
-                    if not hum then 
-                        task.wait(1) 
-                        continue 
-                    end
-                    
-                    local seat = hum.SeatPart
-                    if not seat then 
-                        warn("Please enter a vehicle!")
-                        task.wait(3)
-                        continue 
-                    end
-                    
-                    local car = seat.Parent
-                    Farm.CurrentCar = car
-                    
-                    -- Set primary part
-                    local body = car:FindFirstChild("Body")
-                    if body then
-                        local weight = body:FindFirstChild("#Weight")
-                        if weight then
-                            car.PrimaryPart = weight
-                        end
-                    end
-                    
-                    ensureGroundPart()
-                    
-                    -- Find nearest location with Highlight
-                    local locations
-                    local maxdistance = math.huge
-                    
-                    for i, v in pairs(Workspace:GetChildren()) do
-                        if v.Name == "" and v:FindFirstChild("Highlight") then
-                            local dist = (chr.PrimaryPart.Position - v:GetPivot().Position).magnitude
-                            if dist < maxdistance then
-                                maxdistance = dist
-                                locations = v
-                            end
-                        end
-                    end
-                    
-                    if locations then
-                        warn("Found gift location, moving to it...")
-                        tweenToLocation(car, locations, plr)
-                    elseif not locations and Workspace:FindFirstChild("GiftPickup") then
-                        warn("No gift locations found, going to GiftPickup...")
-                        local giftPickup = Workspace.GiftPickup
-                        
-                        repeat
-                            task.wait(0.1)
-                            if not Farm.AutoDeliver or Farm.CancelFlag then break end
-                            
-                            car.PrimaryPart.AssemblyLinearVelocity = Vector3.zero
-                            car:PivotTo(giftPickup:GetPivot() + Vector3.new(0, 5, 0))
-                            
-                        until reachedMax(car) or not Farm.AutoDeliver or Farm.CancelFlag
-                    else
-                        warn("No gift locations or GiftPickup found, waiting...")
-                        task.wait(3)
-                    end
-                end
-                
-                -- Cleanup
-                if Farm.ActiveTween then
-                    Farm.ActiveTween:Cancel()
-                    Farm.ActiveTween = nil
-                end
-                restoreWorkspaceObjects()
-                if Farm.GroundPart then
-                    Farm.GroundPart:Destroy()
-                    Farm.GroundPart = nil
-                end
-                warn("Auto Deliver stopped")
-            end)
-        else
-            -- Stop Auto Deliver
-            Farm.AutoDeliver = false
-            Farm.CancelFlag = true
-            
-            if Farm.ActiveTween then
-                Farm.ActiveTween:Cancel()
-                Farm.ActiveTween = nil
-            end
-            
-            task.wait(0.2)
-            restoreWorkspaceObjects()
-            
-            if Farm.GroundPart then
-                Farm.GroundPart:Destroy()
-                Farm.GroundPart = nil
-            end
-        end
-    end)
-    
-    -- Stop All Button
-    mainWindow:AddButton("Stop All", function()
-        Farm.AutoFarm = false
-        Farm.AutoDeliver = false
-        Farm.CancelFlag = true
-        
-        if Farm.ActiveTween then
-            Farm.ActiveTween:Cancel()
-            Farm.ActiveTween = nil
-        end
-        
-        restoreWorkspaceObjects()
-        
-        if Farm.GroundPart then
-            Farm.GroundPart:Destroy()
-            Farm.GroundPart = nil
-        end
-        
-        warn("All farming activities stopped!")
-    end)
-    
-    -- Refresh Button
-    mainWindow:AddButton("Refresh Vehicle", function()
-        local chr = Player.Character
-        if chr then
-            local hum = chr:FindFirstChild("Humanoid")
-            if hum and hum.SeatPart then
-                Farm.CurrentCar = hum.SeatPart.Parent
-                warn("Vehicle refreshed: " .. Farm.CurrentCar.Name)
-            else
-                warn("No vehicle detected")
-            end
-        end
-    end)
-end
-
--- Cleanup on script end
-game:GetService("UserInputService").InputBegan:Connect(function(input, gameProcessed)
-    if input.KeyCode == Enum.KeyCode.End then
-        Farm.AutoFarm = false
-        Farm.AutoDeliver = false
-        Farm.CancelFlag = true
-        
-     
+warn("🌙 Midnight Chasers GUI Loaded Successfully!")
