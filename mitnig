@@ -281,6 +281,29 @@ local function tweenToDeliveryLocation(vehicle, targetModel)
             if not TweenCancelled then
                 TweenCancelled = true
                 if ActiveTween then ActiveTween:Cancel() end
+    if DeliveryConnection then DeliveryConnection:Disconnect() end
+    toggleNoClip(false)
+    toggleInfiniteJump(false)
+    restoreWorkspaceObjects()
+    
+    print("[EMERGENCY] All features stopped!")
+end)
+
+-- ========================================
+-- INITIALIZATION
+-- ========================================
+print("===========================================")
+print("MIDNIGHT CHASERS BRUTAL FARM - FIXED VERSION")
+print("===========================================")
+
+initializeStreaming()
+setupAntiAFK()
+
+print("[READY] Script loaded successfully!")
+print("[INFO] GUI is now draggable - click and drag to move it!")
+print("[FIX] Delivery system completely rewritten for stability")
+print("===========================================")
+d
             end
             
             GroundPart.Position = currentPos - Vector3.new(0, 8, 0)
