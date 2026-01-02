@@ -1,6 +1,6 @@
--- // Midnight Chasers: Zuan WM Final Edition 🧙‍♂️ //
--- Mobile-friendly GUI + AutoFarm + AutoDeliver + Anti-Nyangkut Fix
--- Optimized for Delta Mobile
+-- // Midnight Chasers: Zuan WM Dock Ultimate Edition 🧙‍♂️ //
+-- Features: Minimize, Close, Dock Hover, Touch Restore, Smart Ground Alignment
+-- Optimized for Delta Mobile Executor
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
@@ -10,25 +10,28 @@ local Lighting = game:GetService("Lighting")
 local Workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
 
+-- Global state
 getgenv().AutoFarm = false
 getgenv().AutoDeliver = false
 getgenv().Speed = 250
 getgenv().GroundPart = nil
 getgenv().IsRunning = false
+getgenv().Minimized = false
+getgenv().Closed = false
 
--- ANTI-AFK --
+-- Anti AFK
 LocalPlayer.Idled:Connect(function()
     local vu = game:GetService("VirtualUser")
     vu:CaptureController()
     vu:ClickButton2(Vector2.new())
 end)
 
--- BLUR EFFECT --
+-- Blur effect
 local blur = Instance.new("BlurEffect", Lighting)
 blur.Size = 0
 blur.Enabled = false
 
--- HELPER FUNCTIONS --
+-- Helpers
 local function ensureGroundPart()
     if not getgenv().GroundPart then
         local ground = Instance.new("Part", workspace)
@@ -54,21 +57,30 @@ local function findCar()
     return nil
 end
 
--- Lift car slightly above ground to prevent it from getting stuck
-local function liftCarAboveGround(car)
+local function alignCarToGround(car)
     if not car or not car.PrimaryPart then return end
     local origin = car.PrimaryPart.Position
     local ray = Ray.new(origin, Vector3.new(0, -50, 0))
     local hit, pos = Workspace:FindPartOnRay(ray, car)
     if hit then
-        local liftHeight = 10
-        car:PivotTo(CFrame.new(Vector3.new(pos.X, pos.Y + liftHeight, pos.Z), car.PrimaryPart.CFrame.LookVector))
-    else
-        car:PivotTo(car.PrimaryPart.CFrame + Vector3.new(0, 15, 0))
+        local hover = 3
+        car:PivotTo(CFrame.new(Vector3.new(pos.X, pos.Y + hover, pos.Z), car.PrimaryPart.CFrame.LookVector))
     end
 end
 
--- SMOOTH HEARTBEAT TWEEN --
+local function tpBelowSurface(car)
+    if car and car.PrimaryPart then
+        car:PivotTo(car.PrimaryPart.CFrame - Vector3.new(0, 8, 0))
+    end
+end
+
+local function tpAboveSurface(car)
+    if car and car.PrimaryPart then
+        alignCarToGround(car)
+    end
+end
+
+-- Smooth Heartbeat Tween
 local function smoothTween(car, targetPos, speed)
     if not car or not car.PrimaryPart then return end
     ensureGroundPart()
@@ -86,17 +98,16 @@ local function smoothTween(car, targetPos, speed)
         car:PivotTo(CFrame.new(getgenv().GroundPart.Position + Vector3.new(0, 7, 0), targetPos.Position))
         car.PrimaryPart.AssemblyLinearVelocity = car.PrimaryPart.CFrame.LookVector * speed
     end
-    liftCarAboveGround(car)
+    alignCarToGround(car)
 end
 
--- AUTO FARM LOOP --
+-- AutoFarm Loop
 local function autoFarmLoop()
     task.spawn(function()
         getgenv().IsRunning = true
         ensureGroundPart()
         local car = findCar()
-        if not car then warn("❌ No car found!") return end
-
+        if not car then return end
         local frames = {
             CFrame.new(100, -25, 7960),
             CFrame.new(2750, -25, 3690),
@@ -104,7 +115,6 @@ local function autoFarmLoop()
             CFrame.new(-6400, -25, -720),
             CFrame.new(4900, -25, 1200)
         }
-
         while getgenv().AutoFarm and getgenv().IsRunning do
             for _, pos in ipairs(frames) do
                 if not getgenv().AutoFarm then break end
@@ -116,7 +126,7 @@ local function autoFarmLoop()
     end)
 end
 
--- AUTO DELIVER LOOP --
+-- AutoDeliver Loop
 local function autoDeliverLoop()
     task.spawn(function()
         getgenv().IsRunning = true
@@ -125,7 +135,6 @@ local function autoDeliverLoop()
             local plr = LocalPlayer
             local car = findCar()
             if not car then task.wait(1) continue end
-
             local nearest, dist = nil, math.huge
             for _, v in pairs(workspace:GetChildren()) do
                 if v:FindFirstChild("Highlight") then
@@ -136,10 +145,10 @@ local function autoDeliverLoop()
                     end
                 end
             end
-
             if nearest then
+                tpBelowSurface(car)
                 smoothTween(car, nearest.WorldPivot + Vector3.new(0, 5, 0), getgenv().Speed)
-                liftCarAboveGround(car)
+                tpAboveSurface(car)
             else
                 task.wait(1)
             end
@@ -148,40 +157,70 @@ local function autoDeliverLoop()
     end)
 end
 
--- ZUAN STYLE GUI --
+-- GUI CREATION --
 local parentGui = LocalPlayer:FindFirstChildOfClass("PlayerGui") or game:GetService("CoreGui")
 local gui = Instance.new("ScreenGui", parentGui)
-gui.Name = "ZuanMidnightUI"
+gui.Name = "ZuanDockUI"
 gui.ResetOnSpawn = false
 
 local frame = Instance.new("Frame", gui)
 frame.Size = UDim2.new(0, 320, 0, 260)
-frame.Position = UDim2.new(0.5, -160, 0.5, -130)
+frame.Position = UDim2.new(1, -340, 1, -280)
 frame.BackgroundColor3 = Color3.fromRGB(30, 30, 50)
 frame.BorderSizePixel = 0
-
-local grad = Instance.new("UIGradient", frame)
-grad.Color = ColorSequence.new({
-    ColorSequenceKeypoint.new(0, Color3.fromRGB(100, 0, 255)),
-    ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 255, 255))
-})
-grad.Rotation = 45
+frame.Active = true
+frame.ZIndex = 10
 
 local corner = Instance.new("UICorner", frame)
 corner.CornerRadius = UDim.new(0, 14)
 
+local gradient = Instance.new("UIGradient", frame)
+gradient.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(100, 0, 255)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 255, 255))
+})
+gradient.Rotation = 45
+
 local title = Instance.new("TextLabel", frame)
-title.Size = UDim2.new(1, 0, 0, 40)
+title.Size = UDim2.new(1, -60, 0, 40)
+title.Position = UDim2.new(0, 10, 0, 0)
 title.BackgroundTransparency = 1
-title.Text = "⚡ Midnight Zuan Control"
+title.Text = "⚡ Midnight Zuan Dock"
 title.Font = Enum.Font.GothamBold
 title.TextScaled = true
 title.TextColor3 = Color3.fromRGB(200, 170, 255)
-title.TextStrokeTransparency = 0.8
 
-local scroll = Instance.new("ScrollingFrame", frame)
-scroll.Size = UDim2.new(1, 0, 1, -40)
-scroll.Position = UDim2.new(0, 0, 0, 40)
+-- Minimize & Close buttons
+local minBtn = Instance.new("TextButton", frame)
+minBtn.Size = UDim2.new(0, 30, 0, 30)
+minBtn.Position = UDim2.new(1, -60, 0, 5)
+minBtn.Text = "–"
+minBtn.Font = Enum.Font.GothamBold
+minBtn.TextSize = 24
+minBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+minBtn.BackgroundTransparency = 0.8
+minBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 120)
+local c1 = Instance.new("UICorner", minBtn)
+
+local closeBtn = Instance.new("TextButton", frame)
+closeBtn.Size = UDim2.new(0, 30, 0, 30)
+closeBtn.Position = UDim2.new(1, -30, 0, 5)
+closeBtn.Text = "X"
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.TextSize = 20
+closeBtn.TextColor3 = Color3.fromRGB(255, 200, 200)
+closeBtn.BackgroundTransparency = 0.8
+closeBtn.BackgroundColor3 = Color3.fromRGB(100, 50, 50)
+local c2 = Instance.new("UICorner", closeBtn)
+
+-- Content Frame
+local content = Instance.new("Frame", frame)
+content.Size = UDim2.new(1, 0, 1, -40)
+content.Position = UDim2.new(0, 0, 0, 40)
+content.BackgroundTransparency = 1
+
+local scroll = Instance.new("ScrollingFrame", content)
+scroll.Size = UDim2.new(1, 0, 1, 0)
 scroll.CanvasSize = UDim2.new(0, 0, 2, 0)
 scroll.ScrollBarThickness = 4
 scroll.BackgroundTransparency = 1
@@ -195,7 +234,37 @@ status.TextColor3 = Color3.fromRGB(255, 100, 100)
 status.Font = Enum.Font.Gotham
 status.TextSize = 14
 
--- BUTTON CREATOR --
+-- Draggable with inertia
+do
+    local dragging, dragStart, startPos, velocity = false, nil, nil, Vector2.new(0, 0)
+    frame.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            dragStart = input.Position
+            startPos = frame.Position
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
+            local delta = input.Position - dragStart
+            frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+            velocity = input.Delta
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = false
+            local decay = 0.9
+            while math.abs(velocity.X) > 1 or math.abs(velocity.Y) > 1 do
+                frame.Position = UDim2.new(frame.Position.X.Scale, frame.Position.X.Offset + velocity.X, frame.Position.Y.Scale, frame.Position.Y.Offset + velocity.Y)
+                velocity *= decay
+                RunService.Heartbeat:Wait()
+            end
+        end
+    end)
+end
+
+-- Button factory
 local function createButton(text, callback)
     local b = Instance.new("TextButton", scroll)
     b.Size = UDim2.new(1, -20, 0, 40)
@@ -207,21 +276,21 @@ local function createButton(text, callback)
     b.TextSize = 18
     local c = Instance.new("UICorner", b)
     local active = false
-
     b.MouseButton1Click:Connect(function()
         active = not active
         b.BackgroundColor3 = active and Color3.fromRGB(100,0,200) or Color3.fromRGB(50,50,80)
         callback(active)
         if active then
             status.Text = "🟢 Running: "..text
-            status.TextColor3 = Color3.fromRGB(100, 255, 100)
+            status.TextColor3 = Color3.fromRGB(100,255,100)
         else
             status.Text = "🔴 Stopped"
-            status.TextColor3 = Color3.fromRGB(255, 100, 100)
+            status.TextColor3 = Color3.fromRGB(255,100,100)
         end
     end)
 end
 
+-- Buttons
 createButton("Auto Farm", function(state)
     getgenv().AutoFarm = state
     if state then autoFarmLoop() else getgenv().IsRunning = false end
@@ -248,6 +317,55 @@ speedBox.FocusLost:Connect(function()
     if val then getgenv().Speed = val end
 end)
 
+-- Minimize behavior
+minBtn.MouseButton1Click:Connect(function()
+    if not getgenv().Minimized then
+        getgenv().Minimized = true
+        TweenService:Create(frame, TweenInfo.new(0.4, Enum.EasingStyle.Sine), {Size = UDim2.new(0, 80, 0, 80), Transparency = 0.4}):Play()
+        for _, child in pairs(frame:GetChildren()) do
+            if child ~= minBtn and child ~= closeBtn then child.Visible = false end
+        end
+        minBtn.Text = "+"
+    else
+        getgenv().Minimized = false
+        TweenService:Create(frame, TweenInfo.new(0.4, Enum.EasingStyle.Sine), {Size = UDim2.new(0, 320, 0, 260), Transparency = 0}):Play()
+        for _, child in pairs(frame:GetChildren()) do
+            if child ~= minBtn and child ~= closeBtn then child.Visible = true end
+        end
+        minBtn.Text = "–"
+    end
+end)
+
+-- Close behavior
+closeBtn.MouseButton1Click:Connect(function()
+    getgenv().Closed = true
+    TweenService:Create(frame, TweenInfo.new(0.4, Enum.EasingStyle.Sine), {Transparency = 1}):Play()
+    task.wait(0.5)
+    frame.Visible = false
+end)
+
+-- Touch reopen
+local dockIcon = Instance.new("ImageButton", gui)
+dockIcon.Size = UDim2.new(0, 60, 0, 60)
+dockIcon.Position = UDim2.new(1, -70, 1, -70)
+dockIcon.Image = "rbxassetid://7072724538"
+dockIcon.BackgroundTransparency = 1
+dockIcon.Visible = false
+
+dockIcon.MouseButton1Click:Connect(function()
+    frame.Visible = true
+    TweenService:Create(frame, TweenInfo.new(0.4, Enum.EasingStyle.Sine), {Transparency = 0}):Play()
+    getgenv().Closed = false
+    dockIcon.Visible = false
+end)
+
+closeBtn.MouseButton1Click:Connect(function()
+    getgenv().Closed = true
+    frame.Visible = false
+    dockIcon.Visible = true
+end)
+
+-- Blur toggle
 UserInputService.InputBegan:Connect(function(input)
     if input.KeyCode == Enum.KeyCode.RightShift then
         gui.Enabled = not gui.Enabled
@@ -260,4 +378,5 @@ UserInputService.InputBegan:Connect(function(input)
     end
 end)
 
-warn("🌌 Midnight Zuan WM with Anti-Nyangkut loaded!")
+warn("🌌 Zuan WM Dock Ultimate Edition Loaded Successfully!")
+
