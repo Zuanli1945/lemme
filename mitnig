@@ -1,885 +1,472 @@
---[[ 
-Midnight Chasers Auto Farm & Deliver Script
-Optimized for Delta Executor - Full Rewrite
-Created by: Roblox Luau Expert
-Date: January 3, 2026
-]]
+-- Delta Executor Compatible Midnight Chasers Farm Script
+-- Combines original functionality with a custom Zuan WM Dock-like UI
 
--- Constants and Configuration
-local SCRIPT_NAME = "Midnight Chasers Farm Menu"
-local DEFAULT_SPEED = 230
-local GROUND_SIZE = Vector3.new(10000, 10, 10000)
-local BACKUP_FOLDER_NAME = "mrbackupfolder"
-local CHECK_INTERVAL = 0.1
-local MAX_DISTANCE_THRESHOLD = 100
-local CLOSE_DISTANCE_THRESHOLD = 10
-local FINAL_DISTANCE_THRESHOLD = 5
-local DRAG_SENSITIVITY = 0.5
-
--- State Management
-local State = {
-    autoFarm = false,
-    autoDeliver = false,
-    speed = DEFAULT_SPEED,
-    cancelMan = false,
-    currentTween = nil,
-    groundPart = nil,
-    backupFolder = nil,
-    guiVisible = true,
-    dragging = false,
-    dragStart = nil,
-    dragGuiStart = nil
-}
-
--- Services
 local Players = game:GetService("Players")
-local TweenService = game:GetService("TweenService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local VirtualUser = game:GetService("VirtualUser")
-local Workspace = workspace
-local Player = Players.LocalPlayer
 
--- Utility Functions
-local function create(instanceType, properties)
-    local instance = Instance.new(instanceType)
-    for prop, value in pairs(properties) do
-        if prop == "Parent" then
+local LocalPlayer = Players.LocalPlayer
+local Mouse = LocalPlayer:GetMouse()
+
+-- Anti-AFK System
+LocalPlayer.Idled:Connect(function()
+    VirtualUser:CaptureController()
+    VirtualUser:ClickButton2(Vector2.new())
+end)
+
+-- Stream Around Models
+task.spawn(function()
+    for _, v in pairs(workspace:GetDescendants()) do
+        if v:IsA("Model") then
             task.spawn(function()
-                instance.Parent = value
+                LocalPlayer:RequestStreamAroundAsync(v.WorldPivot.Position, 3)
             end)
-        else
-            instance[prop] = value
+            task.wait(0.1) -- Prevent spam
         end
     end
-    return instance
-end
+end)
 
-local function safeDestroy(instance)
-    if instance and instance.Parent then
-        pcall(function()
-            instance:Destroy()
-        end)
-    end
-end
-
-local function getDistance(pos1, pos2)
-    return (pos1 - pos2).Magnitude
-end
-
--- Core Functionality
-local function setupAntiAFK()
-    local antiAfkConnection
-    local function activateAntiAFK()
-        if antiAfkConnection then
-            antiAfkConnection:Disconnect()
-        end
-        
-        antiAfkConnection = Player.Idled:Connect(function()
-            VirtualUser:CaptureController()
-            VirtualUser:ClickButton2(Vector2.new())
-        end)
-    end
-    
-    -- Initial activation
-    activateAntiAFK()
-    
-    return function()
-        if antiAfkConnection then
-            antiAfkConnection:Disconnect()
-            antiAfkConnection = nil
+-- Core Functions
+local function reachedMax(value)
+    local seatCount = 0
+    for _, v in pairs(value:GetDescendants()) do
+        if v:IsA("Seat") then
+            seatCount = seatCount + 1
         end
     end
+    local maxGifts = seatCount * 5
+    local giftsFolder = value:FindFirstChild("Gifts")
+    return giftsFolder and #giftsFolder:GetChildren() == maxGifts
 end
 
-local function ensureBackupFolder()
-    if not State.backupFolder then
-        State.backupFolder = Workspace:FindFirstChild(BACKUP_FOLDER_NAME) or 
-                            create("Folder", {
-                                Name = BACKUP_FOLDER_NAME,
-                                Parent = game.ReplicatedStorage
-                            })
+local function hideWorkspaceObjects(plr)
+    if not ReplicatedStorage:FindFirstChild("mrbackupfolder") then
+        local folder = Instance.new("Folder", ReplicatedStorage)
+        folder.Name = "mrbackupfolder"
     end
-    return State.backupFolder
-end
-
-local function hideWorkspaceObjects(player)
-    local backupFolder = ensureBackupFolder()
     
-    for _, child in ipairs(Workspace:GetChildren()) do
+    local playerName = plr.Name
+    local playerDisplayName = plr.DisplayName
+    
+    for _, v in pairs(workspace:GetChildren()) do
         local shouldHide = false
-        
-        if child:IsA("Model") or child:IsA("Folder") then
-            local name = child.Name:lower()
-            local displayName = player.DisplayName:lower()
-            local playerName = player.Name:lower()
-            
-            shouldHide = not name:find(playerName) and 
-                        not name:find(displayName) and 
-                        not name:find("gift") and 
-                        name ~= ""
-        elseif child:IsA("MeshPart") then
+        if v.ClassName == "Model" or v.ClassName == "Folder" then
+            if v.Name ~= "" and not string.find(v.Name, playerName) and not string.find(v.Name, playerDisplayName) and not string.find(v.Name, "Gift") then
+                shouldHide = true
+            end
+        elseif v:IsA("MeshPart") then
             shouldHide = true
         end
         
         if shouldHide then
-            pcall(function()
-                child.Parent = backupFolder
-            end)
+            v.Parent = ReplicatedStorage:FindFirstChild("mrbackupfolder")
         end
     end
 end
 
 local function restoreWorkspaceObjects()
-    local backupFolder = Workspace:FindFirstChild(BACKUP_FOLDER_NAME) or 
-                        game.ReplicatedStorage:FindFirstChild(BACKUP_FOLDER_NAME)
-    
+    local backupFolder = ReplicatedStorage:FindFirstChild("mrbackupfolder")
     if backupFolder then
-        for _, child in ipairs(backupFolder:GetChildren()) do
-            pcall(function()
-                child.Parent = Workspace
-            end)
+        for _, v in pairs(backupFolder:GetChildren()) do
+            v.Parent = workspace
+            task.wait(0.01) -- Prevent spam
         end
     end
 end
 
 local function ensureGroundPart()
-    if not State.groundPart then
-        State.groundPart = create("Part", {
-            Name = "GroundAlignmentPart",
-            Anchored = true,
-            CanCollide = false,
-            Size = GROUND_SIZE,
-            Transparency = 1,
-            Parent = Workspace
-        })
+    if not _G.ooga then
+        local new = Instance.new("Part", workspace)
+        new.Anchored = true
+        new.CanCollide = false
+        new.Size = Vector3.new(10000, 10, 10000)
+        new.Transparency = 1
+        new.Name = "GroundAlignPart"
+        _G.ooga = new
     end
-    return State.groundPart
 end
 
--- Optimized Streaming System
-local function setupStreamingSystem()
-    local streamingConnection
-    local lastStreamPosition = nil
-    local STREAM_DISTANCE = 500
+local function tweenToPosition(car, targetPos, speed)
+    if not car or not car.PrimaryPart then return end
     
-    local function streamAroundPlayer()
-        local character = Player.Character
-        if character and character.PrimaryPart then
-            local currentPosition = character.PrimaryPart.Position
+    local dist = (car.PrimaryPart.Position - targetPos.Position).Magnitude
+    local tweenInfo = TweenInfo.new(dist / speed, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, 0, false, 0)
+    local tweenValue = Instance.new("CFrameValue")
+    tweenValue.Value = car:GetPrimaryPartCFrame()
+    
+    local connection
+    connection = tweenValue.Changed:Connect(function()
+        if not car or not car.PrimaryPart then 
+            connection:Disconnect()
+            return 
+        end
+        
+        local newPos = tweenValue.Value.Position
+        _G.ooga.Position = newPos - Vector3.new(0, 14, 0)
+        car:PivotTo(CFrame.new(_G.ooga.Position + Vector3.new(0, 7, 0), targetPos.Position))
+        local velo = car.PrimaryPart.CFrame.LookVector * speed
+        car.PrimaryPart.AssemblyLinearVelocity = velo
+    end)
+    
+    local tween = TweenService:Create(tweenValue, tweenInfo, { Value = targetPos })
+    tween:Play()
+    
+    repeat
+        task.wait(0)
+    until tween.PlaybackState ~= Enum.PlaybackState.Playing
+end
+
+local function tweenToLocation(car, locations, plr)
+    if not car or not car.PrimaryPart then return end
+    
+    repeat
+        task.wait(0.1)
+        local speed = getfenv().speed or 230
+        if getfenv().cancelman then
+            speed = 50
+        end
+        
+        local pos = locations.WorldPivot + Vector3.new(0, 5, 0)
+        local dist = (plr.Character.HumanoidRootPart.Position - pos.Position).Magnitude
+        local tweenInfo = TweenInfo.new(dist / speed, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, 0, false, 0)
+        local tweenValue = Instance.new("CFrameValue")
+        tweenValue.Value = car:GetPrimaryPartCFrame()
+        
+        local connection
+        connection = tweenValue.Changed:Connect(function()
+            if not car or not car.PrimaryPart then 
+                connection:Disconnect()
+                return 
+            end
             
-            -- Only stream if player has moved significantly
-            if not lastStreamPosition or getDistance(currentPosition, lastStreamPosition) > 50 then
-                lastStreamPosition = currentPosition
+            local test = tweenValue.Value.Position
+            local playerDist = plr:DistanceFromCharacter(pos.Position)
+            
+            if playerDist > 100 then
+                _G.ooga.Position = test - Vector3.new(0, 14, 0)
+                car:PivotTo(CFrame.new(_G.ooga.Position + Vector3.new(0, 7, 0), pos.Position))
+                local velo = car.PrimaryPart.CFrame.LookVector * speed
+                car.PrimaryPart.AssemblyLinearVelocity = velo
+            elseif playerDist < 100 and playerDist > 10 then
+                if not getfenv().cancelman then
+                    getfenv().cancelman = true
+                    if getfenv().tween then
+                        getfenv().tween:Cancel()
+                    end
+                end
+                local velo = car.PrimaryPart.CFrame.LookVector * 20
+                _G.ooga.Position = test - Vector3.new(0, 8, 0)
+                car:PivotTo(CFrame.new(_G.ooga.Position + Vector3.new(0, 7, 0), Vector3.new(pos.X, car.PrimaryPart.CFrame.Y, pos.Z)))
+                car.PrimaryPart.AssemblyLinearVelocity = velo
+            elseif playerDist < 5 then
+                local lookat = car.PrimaryPart.CFrame * CFrame.new(0, 0, -10000)
+                car:PivotTo(CFrame.new(Vector3.new(pos.X, _G.ooga.CFrame.Y + 7, pos.Z), lookat.Position))
+                car.PrimaryPart.AssemblyLinearVelocity = Vector3.zero
+            end
+        end)
+        
+        getfenv().tween = TweenService:Create(tweenValue, tweenInfo, { Value = pos })
+        getfenv().tween:Play()
+        
+        repeat
+            task.wait(0)
+        until getfenv().tween.PlaybackState ~= Enum.PlaybackState.Playing
+    until not locations:FindFirstChild("Highlight") or not _G.test
+    getfenv().cancelman = nil
+end
+
+-- UI Library (Custom Zuan WM Dock-like UI)
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "FarmMenu"
+ScreenGui.Parent = game.CoreGui
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 250, 0, 30)
+MainFrame.Position = UDim2.new(0, 10, 0, 10)
+MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+MainFrame.BorderSizePixel = 0
+MainFrame.Parent = ScreenGui
+
+-- Title Bar
+local TitleBar = Instance.new("Frame")
+TitleBar.Name = "TitleBar"
+TitleBar.Size = UDim2.new(1, 0, 0, 30)
+TitleBar.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+TitleBar.BorderSizePixel = 0
+TitleBar.Parent = MainFrame
+
+local TitleLabel = Instance.new("TextLabel")
+TitleLabel.Name = "TitleLabel"
+TitleLabel.Size = UDim2.new(1, -60, 1, 0)
+TitleLabel.Position = UDim2.new(0, 0, 0, 0)
+TitleLabel.BackgroundTransparency = 1
+TitleLabel.Text = "Midnight Chasers Farm"
+TitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+TitleLabel.TextSize = 14
+TitleLabel.Font = Enum.Font.SourceSans
+TitleLabel.Parent = TitleBar
+
+-- Close Button
+local CloseButton = Instance.new("TextButton")
+CloseButton.Name = "CloseButton"
+CloseButton.Size = UDim2.new(0, 30, 1, 0)
+CloseButton.Position = UDim2.new(1, -30, 0, 0)
+CloseButton.BackgroundTransparency = 1
+CloseButton.Text = "X"
+CloseButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+CloseButton.TextSize = 14
+CloseButton.Font = Enum.Font.SourceSans
+CloseButton.Parent = TitleBar
+
+-- Minimize Button
+local MinimizeButton = Instance.new("TextButton")
+MinimizeButton.Name = "MinimizeButton"
+MinimizeButton.Size = UDim2.new(0, 30, 1, 0)
+MinimizeButton.Position = UDim2.new(1, -60, 0, 0)
+MinimizeButton.BackgroundTransparency = 1
+MinimizeButton.Text = "-"
+MinimizeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+MinimizeButton.TextSize = 14
+MinimizeButton.Font = Enum.Font.SourceSans
+MinimizeButton.Parent = TitleBar
+
+-- Content Frame
+local ContentFrame = Instance.new("Frame")
+ContentFrame.Name = "ContentFrame"
+ContentFrame.Size = UDim2.new(1, 0, 1, -30)
+ContentFrame.Position = UDim2.new(0, 0, 0, 30)
+ContentFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+ContentFrame.BorderSizePixel = 0
+ContentFrame.Visible = true
+ContentFrame.Parent = MainFrame
+
+local Layout = Instance.new("UIListLayout")
+Layout.Name = "Layout"
+Layout.Padding = UDim.new(0, 5)
+Layout.Parent = ContentFrame
+
+local Padding = Instance.new("UIPadding")
+Padding.Name = "Padding"
+Padding.PaddingLeft = UDim.new(0, 10)
+Padding.PaddingTop = UDim.new(0, 5)
+Padding.Parent = ContentFrame
+
+-- UI Elements
+local AutoFarmToggle = Instance.new("TextButton")
+AutoFarmToggle.Name = "AutoFarmToggle"
+AutoFarmToggle.Size = UDim2.new(1, -20, 0, 30)
+AutoFarmToggle.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+AutoFarmToggle.BorderSizePixel = 0
+AutoFarmToggle.Text = "Auto Farm: OFF"
+AutoFarmToggle.TextColor3 = Color3.fromRGB(255, 100, 100)
+AutoFarmToggle.TextSize = 14
+AutoFarmToggle.Font = Enum.Font.SourceSans
+AutoFarmToggle.Parent = ContentFrame
+
+local AutoDeliverToggle = Instance.new("TextButton")
+AutoDeliverToggle.Name = "AutoDeliverToggle"
+AutoDeliverToggle.Size = UDim2.new(1, -20, 0, 30)
+AutoDeliverToggle.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+AutoDeliverToggle.BorderSizePixel = 0
+AutoDeliverToggle.Text = "Auto Deliver: OFF"
+AutoDeliverToggle.TextColor3 = Color3.fromRGB(255, 100, 100)
+AutoDeliverToggle.TextSize = 14
+AutoDeliverToggle.Font = Enum.Font.SourceSans
+AutoDeliverToggle.Parent = ContentFrame
+
+local SpeedBox = Instance.new("TextBox")
+SpeedBox.Name = "SpeedBox"
+SpeedBox.Size = UDim2.new(1, -20, 0, 30)
+SpeedBox.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+SpeedBox.BorderSizePixel = 0
+SpeedBox.Text = "Speed: 300"
+SpeedBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+SpeedBox.TextSize = 14
+SpeedBox.Font = Enum.Font.SourceSans
+SpeedBox.ClearTextOnFocus = false
+SpeedBox.Parent = ContentFrame
+
+-- Dragging Functionality
+local dragging = false
+local dragStart = nil
+local startPos = nil
+
+local function updatePosition(input)
+    local delta = input.Position - dragStart
+    MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+end
+
+TitleBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        dragStart = input.Position
+        startPos = MainFrame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+        updatePosition(input)
+    end
+end)
+
+-- Button Functionality
+local autoFarmActive = false
+local autoDeliverActive = false
+
+AutoFarmToggle.MouseButton1Click:Connect(function()
+    autoFarmActive = not autoFarmActive
+    AutoFarmToggle.Text = "Auto Farm: " .. (autoFarmActive and "ON" or "OFF")
+    AutoFarmToggle.TextColor3 = autoFarmActive and Color3.fromRGB(100, 255, 100) or Color3.fromRGB(255, 100, 100)
+    
+    if autoFarmActive then
+        hideWorkspaceObjects(LocalPlayer)
+        _G.auto = true
+        -- Start Auto Farm Logic in a separate task
+        task.spawn(function()
+            while _G.auto do
+                task.wait(0.1)
+                local plr = Players.LocalPlayer
+                local chr = plr.Character
+                if not chr or not chr:FindFirstChild("Humanoid") or chr.Humanoid.Health <= 0 then
+                    _G.auto = false
+                    AutoFarmToggle.Text = "Auto Farm: OFF"
+                    AutoFarmToggle.TextColor3 = Color3.fromRGB(255, 100, 100)
+                    break
+                end
                 
-                -- Request streaming around player with reasonable distance
-                pcall(function()
-                    Player:RequestStreamAroundAsync(currentPosition, STREAM_DISTANCE)
-                end)
-            end
-        end
-    end
-    
-    streamingConnection = RunService.Heartbeat:Connect(function()
-        if State.autoFarm or State.autoDeliver then
-            streamAroundPlayer()
-        end
-    end)
-    
-    return function()
-        if streamingConnection then
-            streamingConnection:Disconnect()
-            streamingConnection = nil
-        end
-    end
-end
+                local hum = chr.Humanoid
+                local car = hum.SeatPart
+                if car then
+                    car = car.Parent
+                    ensureGroundPart()
+                    local weightPart = car.Body:FindFirstChild("#Weight")
+                    if weightPart then
+                        car.PrimaryPart = weightPart
+                    end
 
--- Tweening System
-local function tweenToPosition(car, targetCFrame, speed)
-    speed = speed or State.speed
-    
-    local primaryPart = car.PrimaryPart or car:GetPrimaryPartCFrame().Position
-    local startPosition = primaryPart.Position
-    local targetPosition = targetCFrame.Position
-    
-    local distance = getDistance(startPosition, targetPosition)
-    if distance < 1 then return end
-    
-    local duration = distance / speed
-    local tweenInfo = TweenInfo.new(
-        duration,
-        Enum.EasingStyle.Linear,
-        Enum.EasingDirection.InOut,
-        0,
-        false,
-        0
-    )
-    
-    -- Create tween value
-    local cframeValue = create("CFrameValue", {
-        Value = CFrame.new(startPosition),
-        Parent = car
-    })
-    
-    -- Setup ground alignment
-    local groundPart = ensureGroundPart()
-    
-    -- Tween connection
-    local connection
-    connection = cframeValue.Changed:Connect(function()
-        local currentPosition = cframeValue.Value.Position
-        
-        -- Update ground part position
-        groundPart.Position = currentPosition - Vector3.new(0, 14, 0)
-        
-        -- Align car with ground
-        local targetLookAt = targetPosition
-        local carPosition = groundPart.Position + Vector3.new(0, 7, 0)
-        
-        car:PivotTo(CFrame.new(carPosition, targetLookAt))
-        
-        -- Apply velocity
-        if not State.cancelMan then
-            local velocity = car.PrimaryPart.CFrame.LookVector * speed
-            car.PrimaryPart.AssemblyLinearVelocity = velocity
-        end
-    end)
-    
-    -- Create and play tween
-    State.currentTween = TweenService:Create(cframeValue, tweenInfo, {
-        Value = CFrame.new(targetPosition)
-    })
-    
-    State.currentTween:Play()
-    
-    -- Wait for completion
-    local completed = false
-    while not completed and (State.autoFarm or State.autoDeliver) do
-        task.wait(CHECK_INTERVAL)
-        
-        local playbackState = State.currentTween.PlaybackState
-        if playbackState == Enum.PlaybackState.Completed or 
-           playbackState == Enum.PlaybackState.Cancelled or 
-           playbackState == Enum.PlaybackState.Paused then
-            completed = true
-        end
-    end
-    
-    -- Cleanup
-    if connection then
-        connection:Disconnect()
-    end
-    safeDestroy(cframeValue)
-    
-    -- Final position correction
-    if completed and car.PrimaryPart then
-        car.PrimaryPart.AssemblyLinearVelocity = Vector3.zero
-    end
-    
-    State.currentTween = nil
-    return completed
-end
+                    local frames = {
+                        CFrame.new(105.419128, -26.0098934, 7965.37988, -3.36170197e-05, 0.951051414, -0.309032798, -1, -3.36170197e-05, 5.31971455e-06, -5.31971455e-06, 0.309032798, 0.951051414),
+                        CFrame.new(2751.86499, -26.0098934, 3694.63354, 3.34978104e-05, 0.951051414, -0.309032798, -1, 3.34978104e-05, -5.31971455e-06, 5.31971455e-06, 0.309032798, 0.951051414),
+                        CFrame.new(-8821.48438, -26.0098934, 2042.49939, -3.36170197e-05, 0.951051414, -0.309032798, -1, -3.36170197e-05, 5.31971455e-06, -5.31971455e-06, 0.309032798, 0.951051414),
+                        CFrame.new(-6408.62109, -26.0098934, -727.765198, 3.34978104e-05, 0.951051414, -0.309032798, -1, 3.34978104e-05, -5.31971455e-06, 5.31971455e-06, 0.309032798, 0.951051414),
+                        CFrame.new(-6099.79639, -26.00989345, -1027.94556, -3.36170197e-05, 0.951051414, -0.309032798, -1, -3.36170197e-05, 5.31971455e-06, -5.31971455e-06, 0.309032798, 0.951051414),
+                        CFrame.new(-6066.70068, -26.0098934, 493.255524, 3.34978104e-05, 0.951051414, -0.309032798, -1, 3.34978104e-05, -5.31971455e-06, 5.31971455e-06, 0.309032798, 0.951051414),
+                        CFrame.new(132.786133, -26.0098934, 15.2286377, 3.34978104e-05, 0.951051414, -0.309032798, -1, 3.34978104e-05, -5.31971455e-06, 5.31971455e-06, 0.309032798, 0.951051414),
+                        CFrame.new(-7692.85449, -26.0098934, -4668.61963, -3.36170197e-05, 0.951051414, -0.309032798, -1, -3.36170197e-05, 5.31971455e-06, -5.31971455e-06, 0.309032798, 0.951051414),
+                        CFrame.new(4887.24609, -26.0098934, 1222.96826, -3.36170197e-05, 0.951051414, -0.309032798, -1, -3.36170197e-05, 5.31971455e-06, -5.31971455e-06, 0.309032798, 0.951051414)
+                    }
 
-local function reachedMax(vehicle)
-    if not vehicle:FindFirstChild("Gifts") then return false end
-    
-    local seatCount = 0
-    for _, child in ipairs(vehicle:GetDescendants()) do
-        if child:IsA("Seat") then
-            seatCount += 1
-        end
-    end
-    
-    local maxGifts = seatCount * 5
-    return #vehicle.Gifts:GetChildren() >= maxGifts
-end
-
-local function findNearestLocation(player)
-    local nearestLocation = nil
-    local minDistance = math.huge
-    local playerPos = player.Character and player.Character.PrimaryPart and player.Character.PrimaryPart.Position
-    
-    if not playerPos then return nil end
-    
-    for _, child in ipairs(Workspace:GetChildren()) do
-        if child.Name == "" and child:FindFirstChild("Highlight") then
-            local locationPos = child.WorldPivot.Position
-            local distance = getDistance(playerPos, locationPos)
-            
-            if distance < minDistance then
-                minDistance = distance
-                nearestLocation = child
-            end
-        end
-    end
-    
-    return nearestLocation
-end
-
-local function tweenToLocation(car, location, player)
-    if not location or not car or not player.Character then return end
-    
-    local primaryPart = car.PrimaryPart or car:GetPrimaryPartCFrame().Position
-    local startPosition = primaryPart.Position
-    local targetPosition = location.WorldPivot.Position + Vector3.new(0, 5, 0)
-    
-    local distance = getDistance(startPosition, targetPosition)
-    if distance < 1 then return end
-    
-    local speed = State.cancelMan and 50 or State.speed
-    local duration = distance / speed
-    local tweenInfo = TweenInfo.new(
-        duration,
-        Enum.EasingStyle.Linear,
-        Enum.EasingDirection.InOut,
-        0,
-        false,
-        0
-    )
-    
-    -- Create tween value
-    local cframeValue = create("CFrameValue", {
-        Value = CFrame.new(startPosition),
-        Parent = car
-    })
-    
-    -- Setup ground alignment
-    local groundPart = ensureGroundPart()
-    
-    -- Tween connection
-    local connection
-    connection = cframeValue.Changed:Connect(function()
-        local currentPosition = cframeValue.Value.Position
-        local playerDistance = player:DistanceFromCharacter(currentPosition)
-        
-        -- Update ground part
-        groundPart.Position = currentPosition - Vector3.new(0, 14, 0)
-        
-        if playerDistance > MAX_DISTANCE_THRESHOLD then
-            -- Normal movement
-            car:PivotTo(CFrame.new(groundPart.Position + Vector3.new(0, 7, 0), targetPosition))
-            
-            if not State.cancelMan then
-                local velocity = car.PrimaryPart.CFrame.LookVector * speed
-                car.PrimaryPart.AssemblyLinearVelocity = velocity
-            end
-        elseif playerDistance > CLOSE_DISTANCE_THRESHOLD then
-            -- Slow down approach
-            if not State.cancelMan then
-                State.cancelMan = true
-                if State.currentTween then
-                    State.currentTween:Cancel()
+                    for _, frame in pairs(frames) do
+                        if not _G.auto then break end
+                        local speed = getfenv().speed or 300
+                        local pos = frame + Vector3.new(0, 5, 0)
+                        tweenToPosition(car, pos, speed)
+                    end
                 end
             end
-            
-            car:PivotTo(CFrame.new(groundPart.Position + Vector3.new(0, 7, 0), Vector3.new(targetPosition.X, groundPart.Position.Y + 7, targetPosition.Z)))
-            car.PrimaryPart.AssemblyLinearVelocity = car.PrimaryPart.CFrame.LookVector * 20
-        elseif playerDistance < FINAL_DISTANCE_THRESHOLD then
-            -- Final positioning
-            local lookAt = car.PrimaryPart.CFrame * CFrame.new(0, 0, -10000)
-            car:PivotTo(CFrame.new(Vector3.new(targetPosition.X, groundPart.Position.Y + 7, targetPosition.Z), lookAt.Position))
-            car.PrimaryPart.AssemblyLinearVelocity = Vector3.zero
+        end)
+    else
+        _G.auto = false
+        if getfenv().tween then
+            getfenv().tween:Cancel()
         end
-    end)
-    
-    -- Create and play tween
-    State.currentTween = TweenService:Create(cframeValue, tweenInfo, {
-        Value = CFrame.new(targetPosition)
-    })
-    
-    State.currentTween:Play()
-    
-    -- Wait for completion
-    local completed = false
-    while not completed and State.autoDeliver do
-        task.wait(CHECK_INTERVAL)
-        
-        if not location:FindFirstChild("Highlight") then
-            completed = true
-        end
-        
-        local playbackState = State.currentTween.PlaybackState
-        if playbackState == Enum.PlaybackState.Completed or 
-           playbackState == Enum.PlaybackState.Cancelled or 
-           playbackState == Enum.PlaybackState.Paused then
-            completed = true
-        end
-        
-        -- Check if location is still valid
-        if not Workspace:FindFirstChild(location.Name) then
-            completed = true
-        end
-    end
-    
-    -- Cleanup
-    if connection then
-        connection:Disconnect()
-    end
-    safeDestroy(cframeValue)
-    
-    State.currentTween = nil
-    State.cancelMan = false
-    return completed
-end
-
--- Auto Farm Logic
-local function startAutoFarm()
-    State.autoFarm = true
-    hideWorkspaceObjects(Player)
-    
-    local farmLoop
-    farmLoop = RunService.Heartbeat:Connect(function()
-        if not State.autoFarm then
-            if farmLoop then
-                farmLoop:Disconnect()
-                farmLoop = nil
-            end
-            return
-        end
-        
-        local character = Player.Character
-        if not character then return end
-        
-        local humanoid = character:FindFirstChild("Humanoid")
-        if not humanoid or humanoid.SeatPart == nil then return end
-        
-        local car = humanoid.SeatPart.Parent
-        if not car then return end
-        
-        -- Set primary part for better alignment
-        if not car.PrimaryPart then
-            car.PrimaryPart = car:FindFirstChild("Body") and car.Body:FindFirstChild("#Weight") or car:GetPrimaryPartCFrame().Position
-        end
-        
-        -- Farm locations (optimized)
-        local farmLocations = {
-            CFrame.new(105.419128, -26.0098934, 7965.37988),
-            CFrame.new(2751.86499, -26.0098934, 3694.63354),
-            CFrame.new(-8821.48438, -26.0098934, 2042.49939),
-            CFrame.new(-6408.62109, -26.0098934, -727.765198),
-            CFrame.new(-6099.79639, -26.00989345, -1027.94556),
-            CFrame.new(-6066.70068, -26.0098934, 493.255524),
-            CFrame.new(132.786133, -26.0098934, 15.2286377),
-            CFrame.new(-7692.85449, -26.0098934, -4668.61963),
-            CFrame.new(4887.24609, -26.0098934, 1222.96826)
-        }
-        
-        for _, location in ipairs(farmLocations) do
-            if not State.autoFarm then break end
-            
-            local targetCFrame = location + Vector3.new(0, 5, 0)
-            tweenToPosition(car, targetCFrame, State.speed)
-            
-            -- Small delay between locations to prevent spam
-            task.wait(0.1)
-        end
-    end)
-    
-    return function()
-        if farmLoop then
-            farmLoop:Disconnect()
-            farmLoop = nil
-        end
-        
-        if State.currentTween then
-            State.currentTween:Cancel()
-            State.currentTween = nil
-        end
-        
-        State.autoFarm = false
         restoreWorkspaceObjects()
-        
-        -- Reset vehicle velocity
-        local character = Player.Character
-        if character and character.Humanoid and character.Humanoid.SeatPart then
-            local car = character.Humanoid.SeatPart.Parent
-            if car and car.PrimaryPart then
-                car.PrimaryPart.AssemblyLinearVelocity = Vector3.zero
-            end
-        end
     end
-end
+end)
 
--- Auto Deliver Logic
-local function startAutoDeliver()
-    State.autoDeliver = true
-    hideWorkspaceObjects(Player)
+AutoDeliverToggle.MouseButton1Click:Connect(function()
+    autoDeliverActive = not autoDeliverActive
+    AutoDeliverToggle.Text = "Auto Deliver: " .. (autoDeliverActive and "ON" or "OFF")
+    AutoDeliverToggle.TextColor3 = autoDeliverActive and Color3.fromRGB(100, 255, 100) or Color3.fromRGB(255, 100, 100)
     
-    local deliverLoop
-    deliverLoop = RunService.Heartbeat:Connect(function()
-        if not State.autoDeliver then
-            if deliverLoop then
-                deliverLoop:Disconnect()
-                deliverLoop = nil
-            end
-            return
-        end
-        
-        local character = Player.Character
-        if not character then return end
-        
-        local humanoid = character:FindFirstChild("Humanoid")
-        if not humanoid or humanoid.SeatPart == nil then return end
-        
-        local car = humanoid.SeatPart.Parent
-        if not car then return end
-        
-        -- Set primary part
-        if not car.PrimaryPart then
-            car.PrimaryPart = car:FindFirstChild("Body") and car.Body:FindFirstChild("#Weight") or car:GetPrimaryPartCFrame().Position
-        end
-        
-        -- Find nearest delivery location
-        local nearestLocation = findNearestLocation(Player)
-        
-        if nearestLocation then
-            tweenToLocation(car, nearestLocation, Player)
-        elseif Workspace:FindFirstChild("GiftPickup") and not reachedMax(car) then
-            -- Go to gift pickup if not full
-            local pickupPosition = Workspace.GiftPickup.WorldPivot.Position + Vector3.new(0, 5, 0)
-            tweenToPosition(car, CFrame.new(pickupPosition), State.speed)
-        end
-        
-        -- Small delay to prevent spam
-        task.wait(0.2)
-    end)
-    
-    return function()
-        if deliverLoop then
-            deliverLoop:Disconnect()
-            deliverLoop = nil
-        end
-        
-        if State.currentTween then
-            State.currentTween:Cancel()
-            State.currentTween = nil
-        end
-        
-        State.autoDeliver = false
-        restoreWorkspaceObjects()
-        
-        -- Reset vehicle velocity
-        local character = Player.Character
-        if character and character.Humanoid and character.Humanoid.SeatPart then
-            local car = character.Humanoid.SeatPart.Parent
-            if car and car.PrimaryPart then
-                car.PrimaryPart.AssemblyLinearVelocity = Vector3.zero
-            end
-        end
-    end
-end
-
--- GUI System
-local function createGUI()
-    -- Main GUI
-    local gui = create("ScreenGui", {
-        Name = SCRIPT_NAME,
-        ResetOnSpawn = false,
-        ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
-        Parent = Player:WaitForChild("PlayerGui")
-    })
-    
--- Main frame (flat dark theme)
-local mainFrame = create("Frame", {
-    Name = "MainFrame",
-    Size = UDim2.new(0, 250, 0, 200),
-    Position = UDim2.new(0.5, -125, 0.5, -100),
-    BackgroundColor3 = Color3.fromRGB(30, 30, 40),
-    BorderSizePixel = 1,
-    BorderColor3 = Color3.fromRGB(50, 50, 70),
-    Active = true,
-    Draggable = false, -- We'll handle dragging manually
-    Parent = gui
-})
-
--- Title bar
-local titleBar = create("Frame", {
-    Name = "TitleBar",
-    Size = UDim2.new(1, 0, 0, 30),
-    Position = UDim2.new(0, 0, 0, 0),
-    BackgroundColor3 = Color3.fromRGB(25, 25, 35),
-    BorderSizePixel = 0,
-    Parent = mainFrame
-})
-
--- Title text
-local titleText = create("TextLabel", {
-    Name = "TitleText",
-    Text = SCRIPT_NAME,
-    Size = UDim2.new(1, -60, 1, 0),
-    Position = UDim2.new(0, 10, 0, 0),
-    BackgroundColor3 = Color3.fromRGB(255, 255, 255, 0),
-    BorderSizePixel = 0,
-    TextColor3 = Color3.fromRGB(220, 220, 255),
-    TextSize = 14,
-    Font = Enum.Font.GothamBold,
-    TextXAlignment = Enum.TextXAlignment.Left,
-    TextYAlignment = Enum.TextYAlignment.Center,
-    Parent = titleBar
-})
-
--- Minimize button
-local minimizeButton = create("TextButton", {
-    Name = "MinimizeButton",
-    Text = "–",
-    Size = UDim2.new(0, 30, 1, 0),
-    Position = UDim2.new(1, -60, 0, 0),
-    BackgroundColor3 = Color3.fromRGB(40, 40, 55),
-    BorderSizePixel = 0,
-    TextColor3 = Color3.fromRGB(200, 200, 230),
-    TextSize = 20,
-    Font = Enum.Font.GothamBold,
-    Parent = titleBar
-})
-
--- Close button
-local closeButton = create("TextButton", {
-    Name = "CloseButton",
-    Text = "X",
-    Size = UDim2.new(0, 30, 1, 0),
-    Position = UDim2.new(1, -30, 0, 0),
-    BackgroundColor3 = Color3.fromRGB(40, 40, 55),
-    BorderSizePixel = 0,
-    TextColor3 = Color3.fromRGB(200, 200, 230),
-    TextSize = 16,
-    Font = Enum.Font.GothamBold,
-    Parent = titleBar
-})
-
--- Content frame
-local contentFrame = create("Frame", {
-    Name = "ContentFrame",
-    Size = UDim2.new(1, 0, 1, -30),
-    Position = UDim2.new(0, 0, 0, 30),
-    BackgroundColor3 = Color3.fromRGB(35, 35, 45),
-    BorderSizePixel = 0,
-    Parent = mainFrame
-})
-
--- Auto Farm button
-local autoFarmButton = create("TextButton", {
-    Name = "AutoFarmButton",
-    Text = "Auto Farm",
-    Size = UDim2.new(0.9, 0, 0, 35),
-    Position = UDim2.new(0.05, 0, 0.1, 0),
-    BackgroundColor3 = Color3.fromRGB(50, 50, 70),
-    BorderColor3 = Color3.fromRGB(70, 70, 90),
-    TextColor3 = Color3.fromRGB(220, 220, 255),
-    TextSize = 16,
-    Font = Enum.Font.GothamBold,
-    AutoButtonColor = false,
-    Parent = contentFrame
-})
-
--- Auto Deliver button
-local autoDeliverButton = create("TextButton", {
-    Name = "AutoDeliverButton",
-    Text = "Auto Deliver",
-    Size = UDim2.new(0.9, 0, 0, 35),
-    Position = UDim2.new(0.05, 0, 0.3, 0),
-    BackgroundColor3 = Color3.fromRGB(50, 50, 70),
-    BorderColor3 = Color3.fromRGB(70, 70, 90),
-    TextColor3 = Color3.fromRGB(220, 220, 255),
-    TextSize = 16,
-    Font = Enum.Font.GothamBold,
-    AutoButtonColor = false,
-    Parent = contentFrame
-})
-
--- Speed label
-local speedLabel = create("TextLabel", {
-    Name = "SpeedLabel",
-    Text = "Speed:",
-    Size = UDim2.new(0.3, 0, 0, 25),
-    Position = UDim2.new(0.05, 0, 0.5, 0),
-    BackgroundColor3 = Color3.fromRGB(255, 255, 255, 0),
-    BorderSizePixel = 0,
-    TextColor3 = Color3.fromRGB(200, 200, 230),
-    TextSize = 14,
-    Font = Enum.Font.Gotham,
-    Parent = contentFrame
-})
-
--- Speed box
-local speedBox = create("TextBox", {
-    Name = "SpeedBox",
-    Text = tostring(DEFAULT_SPEED),
-    Size = UDim2.new(0.4, 0, 0, 25),
-    Position = UDim2.new(0.35, 0, 0.5, 0),
-    BackgroundColor3 = Color3.fromRGB(40, 40, 55),
-    BorderColor3 = Color3.fromRGB(60, 60, 80),
-    TextColor3 = Color3.fromRGB(220, 220, 255),
-    TextSize = 14,
-    Font = Enum.Font.Gotham,
-    ClearTextOnFocus = false,
-    Parent = contentFrame
-})
-
--- Button hover effects
-local function setupButtonHover(button, defaultColor, hoverColor)
-    button.MouseEnter:Connect(function()
-        button.BackgroundColor3 = hoverColor
-    end)
-    
-    button.MouseLeave:Connect(function()
-        button.BackgroundColor3 = defaultColor
-    end)
-end
-
-setupButtonHover(autoFarmButton, Color3.fromRGB(50, 50, 70), Color3.fromRGB(65, 65, 85))
-setupButtonHover(autoDeliverButton, Color3.fromRGB(50, 50, 70), Color3.fromRGB(65, 65, 85))
-setupButtonHover(minimizeButton, Color3.fromRGB(40, 40, 55), Color3.fromRGB(60, 60, 75))
-setupButtonHover(closeButton, Color3.fromRGB(40, 40, 55), Color3.fromRGB(200, 60, 60))
-
--- Draggable functionality
-local function setupDraggable(frame)
-    local dragInput = nil
-    local dragStart = nil
-    local startPos = nil
-    
-    local function updateInput(input)
-        local delta = input.Position - dragStart
-        frame.Position = UDim2.new(
-            startPos.X.Scale, startPos.X.Offset + delta.X,
-            startPos.Y.Scale, startPos.Y.Offset + delta.Y
-        )
-    end
-    
-    frame.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragStart = input.Position
-            startPos = frame.Position
-            
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    dragInput = nil
+    if autoDeliverActive then
+        hideWorkspaceObjects(LocalPlayer)
+        _G.test = true
+        -- Start Auto Deliver Logic in a separate task
+        task.spawn(function()
+            while _G.test do
+                task.wait(0.1)
+                local plr = Players.LocalPlayer
+                local chr = plr.Character
+                if not chr or not chr:FindFirstChild("Humanoid") or chr.Humanoid.Health <= 0 then
+                    _G.test = false
+                    AutoDeliverToggle.Text = "Auto Deliver: OFF"
+                    AutoDeliverToggle.TextColor3 = Color3.fromRGB(255, 100, 100)
+                    break
                 end
-            end)
-        end
-    end)
-    
-    frame.InputChanged:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-            dragInput = input
-        end
-    end)
-    
-    UserInputService.InputChanged:Connect(function(input)
-        if input == dragInput and input UserInputState == Enum.UserInputState.End then
-            dragInput = nil
-        end
-    end)
-end
+                
+                ensureGroundPart()
+                local seat = chr.Humanoid.SeatPart
+                if seat then
+                    local car = seat.Parent
+                    local weightPart = car.Body:FindFirstChild("#Weight")
+                    if weightPart then
+                        car.PrimaryPart = weightPart
+                    end
 
-setupDraggable(titleBar)
+                    local locations
+                    local maxdistance = math.huge
+                    for _, v in pairs(workspace:GetChildren()) do
+                        if v.Name == "" and v:FindFirstChild("Highlight") then
+                            local dist = (chr.PrimaryPart.Position - v.WorldPivot.Position).Magnitude
+                            if dist < maxdistance then
+                                maxdistance = dist
+                                locations = v
+                            end
+                        end
+                    end
 
--- Button functionality
-local stopFarm, stopDeliver
-
-autoFarmButton.MouseButton1Click:Connect(function()
-    if State.autoFarm then
-        if stopFarm then
-            stopFarm()
-            stopFarm = nil
-        end
-        autoFarmButton.BackgroundColor3 = Color3.fromRGB(50, 50, 70)
+                    if locations then
+                        tweenToLocation(car, locations, plr)
+                    elseif not locations and workspace:FindFirstChild("GiftPickup") then
+                        repeat
+                            task.wait(0.1)
+                            if car and car.PrimaryPart then
+                                car.PrimaryPart.AssemblyLinearVelocity = Vector3.zero
+                                car:PivotTo(CFrame.new(workspace.GiftPickup.WorldPivot.Position + Vector3.new(0, 5, 0)))
+                            end
+                        until reachedMax(car) or not _G.test
+                    end
+                end
+            end
+        end)
     else
-        stopFarm = startAutoFarm()
-        autoFarmButton.BackgroundColor3 = Color3.fromRGB(60, 100, 60)
+        _G.test = false
+        if getfenv().tween then
+            getfenv().tween:Cancel()
+        end
+        restoreWorkspaceObjects()
     end
 end)
 
-autoDeliverButton.MouseButton1Click:Connect(function()
-    if State.autoDeliver then
-        if stopDeliver then
-            stopDeliver()
-            stopDeliver = nil
-        end
-        autoDeliverButton.BackgroundColor3 = Color3.fromRGB(50, 50, 70)
+SpeedBox.FocusLost:Connect(function(enter)
+    local speed = tonumber(SpeedBox.Text:gsub("Speed: ", ""))
+    if speed then
+        getfenv().speed = speed
+        SpeedBox.Text = "Speed: " .. speed
     else
-        stopDeliver = startAutoDeliver()
-        autoDeliverButton.BackgroundColor3 = Color3.fromRGB(60, 100, 60)
+        SpeedBox.Text = "Speed: " .. (getfenv().speed or 300)
     end
 end)
 
-minimizeButton.MouseButton1Click:Connect(function()
-    State.guiVisible = not State.guiVisible
-    mainFrame.Visible = State.guiVisible
-    
-    if State.guiVisible then
-        minimizeButton.Text = "–"
-    else
-        minimizeButton.Text = "+"
-    end
+CloseButton.MouseButton1Click:Connect(function()
+    ScreenGui:Destroy()
 end)
 
-closeButton.MouseButton1Click:Connect(function()
-    -- Cleanup everything
-    if stopFarm then
-        stopFarm()
-        stopFarm = nil
-    end
-    
-    if stopDeliver then
-        stopDeliver()
-        stopDeliver = nil
-    end
-    
-    if State.currentTween then
-        State.currentTween:Cancel()
-        State.currentTween = nil
-    end
-    
-    restoreWorkspaceObjects()
-    
-    -- Clean up ground part
-    if State.groundPart then
-        safeDestroy(State.groundPart)
-        State.groundPart = nil
-    end
-    
-    -- Clean up backup folder
-    if State.backupFolder then
-        safeDestroy(State.backupFolder)
-        State.backupFolder = nil
-    end
-    
-    -- Destroy GUI
-    safeDestroy(gui)
+MinimizeButton.MouseButton1Click:Connect(function()
+    ContentFrame.Visible = not ContentFrame.Visible
+    MinimizeButton.Text = ContentFrame.Visible and "-" or "+"
 end)
 
-speedBox.FocusLost:Connect(function(enterPressed)
-    if enterPressed then
-        local newSpeed = tonumber(speedBox.Text)
-        if newSpeed and newSpeed > 0 then
-            State.speed = newSpeed
-            speedBox.Text = tostring(newSpeed)
-        else
-            speedBox.Text = tostring(State.speed)
-        end
-    end
-end)
-
-speedBox.Changed:Connect(function(property)
-    if property == "Text" then
-        local text = speedBox.Text
-        text = text:gsub("[^%d.]", "")
-        if text ~= speedBox.Text then
-            speedBox.Text = text
-        end
-    end
-end)
-
--- Mobile compatibility: Make buttons larger for touch
-if UserInputService.TouchEnabled then
-    autoFarmButton.Size = UDim2.new(0.9, 0, 0, 45)
-    autoDeliverButton.Size = UDim2.new(0.9, 0, 0, 45)
-    autoFarmButton.Position = UDim2.new(0.05, 0, 0.08, 0)
-    autoDeliverButton.Position = UDim2.new(0.05, 0, 0.28, 0)
-    speedBox.Size = UDim2.new(0.4, 0, 0, 35)
-    speedLabel.Size = UDim2.new(0.3, 0, 0, 35)
-    speedLabel.Position = UDim2.new(0.05, 0, 0.48, 0)
-    speedBox.Position = UDim2.new(0.35, 0, 0.48, 0)
-end
-
-return gui
+-- Initialize ground part
+ensureGroundPart()
