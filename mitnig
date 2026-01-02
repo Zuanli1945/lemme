@@ -1,230 +1,520 @@
---==================================================
--- AUTO FARM + AUTO EVENT (COMBINED CONTROLLER)
---==================================================
+-- ========================================
+-- MIDNIGHT CHASERS FARM SCRIPT - ENHANCED
+-- Refactored with improved structure and brutal features
+-- ========================================
 
--- SERVICES
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local VirtualUser = game:GetService("VirtualUser")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local plr = Players.LocalPlayer
+local LocalPlayer = Players.LocalPlayer
 
---==================================================
--- STATE
---==================================================
-local State = {
-	AutoFarm = false,
-	AutoEvent = false,
-	Speed = 250,
-	Car = nil,
-	Tween = nil,
-	Ground = nil,
+-- ========================================
+-- CONFIGURATION
+-- ========================================
+local Config = {
+    Speed = 300,
+    AutoFarm = false,
+    AutoDeliver = false,
+    AntiAFK = true,
+    NoClip = false,
+    InfiniteJump = false,
+    StreamRadius = 3,
+    TweenSpeed = {
+        Fast = 500,
+        Normal = 300,
+        Slow = 150,
+        Approach = 20
+    }
 }
 
---==================================================
--- ANTI AFK
---==================================================
-plr.Idled:Connect(function()
-	VirtualUser:CaptureController()
-	VirtualUser:ClickButton2(Vector2.new())
+-- ========================================
+-- STREAMING OPTIMIZATION
+-- Saya menambahkan optimisasi streaming untuk memuat area map lebih cepat
+-- ========================================
+local function initializeStreaming()
+    task.spawn(function()
+        for _, model in pairs(workspace:GetDescendants()) do
+            if model:IsA("Model") then
+                task.spawn(function()
+                    pcall(function()
+                        LocalPlayer:RequestStreamAroundAsync(model.WorldPivot.Position, Config.StreamRadius)
+                    end)
+                end)
+                task.wait(0.01) -- Sedikit delay agar tidak overload
+            end
+        end
+        print("[STREAMING] All areas loaded")
+    end)
+end
+
+-- ========================================
+-- ANTI-AFK SYSTEM
+-- Sistem ini mencegah kick karena idle
+-- ========================================
+local function setupAntiAFK()
+    LocalPlayer.Idled:Connect(function()
+        if Config.AntiAFK then
+            warn("[ANTI-AFK] Triggered - keeping you active")
+            VirtualUser:CaptureController()
+            VirtualUser:ClickButton2(Vector2.new())
+        end
+    end)
+    print("[ANTI-AFK] System initialized")
+end
+
+-- ========================================
+-- GIFT DETECTION
+-- Menghitung apakah sudah mencapai maksimum gift
+-- ========================================
+local function hasReachedMaxGifts(vehicle)
+    local seatCount = 0
+    for _, descendant in pairs(vehicle:GetDescendants()) do
+        if descendant:IsA("Seat") then
+            seatCount = seatCount + 1
+        end
+    end
+    
+    local maxGifts = seatCount * 5
+    local giftsFolder = vehicle:FindFirstChild("Gifts")
+    
+    if giftsFolder then
+        return #giftsFolder:GetChildren() >= maxGifts
+    end
+    return false
+end
+
+-- ========================================
+-- WORKSPACE MANAGEMENT
+-- Menyembunyikan objek untuk performa lebih baik
+-- ========================================
+local BackupFolder
+
+local function hideWorkspaceObjects()
+    if not BackupFolder then
+        BackupFolder = Instance.new("Folder")
+        BackupFolder.Name = "OptimizationBackup"
+        BackupFolder.Parent = ReplicatedStorage
+    end
+    
+    local hiddenCount = 0
+    for _, obj in pairs(workspace:GetChildren()) do
+        local shouldHide = (
+            (obj:IsA("Model") or obj:IsA("Folder")) and
+            not string.find(obj.Name, LocalPlayer.Name) and
+            not string.find(obj.Name, LocalPlayer.DisplayName) and
+            not string.find(obj.Name, "Gift") and
+            obj.Name ~= ""
+        ) or obj:IsA("MeshPart")
+        
+        if shouldHide then
+            obj.Parent = BackupFolder
+            hiddenCount = hiddenCount + 1
+        end
+    end
+    print("[OPTIMIZATION] Hidden " .. hiddenCount .. " objects for better performance")
+end
+
+local function restoreWorkspaceObjects()
+    if BackupFolder then
+        for _, obj in pairs(BackupFolder:GetChildren()) do
+            obj.Parent = workspace
+            task.wait(0.01)
+        end
+        print("[OPTIMIZATION] Restored all objects")
+    end
+end
+
+-- ========================================
+-- GROUND CREATION
+-- Membuat ground platform untuk tweening yang smooth
+-- ========================================
+local GroundPart
+
+local function ensureGroundPart()
+    if not GroundPart then
+        GroundPart = Instance.new("Part")
+        GroundPart.Name = "FarmGroundPlatform"
+        GroundPart.Anchored = true
+        GroundPart.Size = Vector3.new(15000, 10, 15000)
+        GroundPart.Transparency = 1
+        GroundPart.CanCollide = false
+        GroundPart.Parent = workspace
+        print("[GROUND] Platform created")
+    end
+end
+
+-- ========================================
+-- NOCLIP FEATURE (BRUTAL ADDITION)
+-- Membuat karakter bisa menembus dinding
+-- ========================================
+local NoClipConnection
+
+local function toggleNoClip(enabled)
+    if NoClipConnection then
+        NoClipConnection:Disconnect()
+        NoClipConnection = nil
+    end
+    
+    if enabled then
+        NoClipConnection = game:GetService("RunService").Stepped:Connect(function()
+            if LocalPlayer.Character then
+                for _, part in pairs(LocalPlayer.Character:GetDescendants()) do
+                    if part:IsA("BasePart") then
+                        part.CanCollide = false
+                    end
+                end
+            end
+        end)
+        print("[NOCLIP] Enabled - you can pass through walls")
+    else
+        print("[NOCLIP] Disabled")
+    end
+end
+
+-- ========================================
+-- INFINITE JUMP (BRUTAL ADDITION)
+-- Membuat bisa jump tanpa batas
+-- ========================================
+local InfiniteJumpConnection
+
+local function toggleInfiniteJump(enabled)
+    if InfiniteJumpConnection then
+        InfiniteJumpConnection:Disconnect()
+        InfiniteJumpConnection = nil
+    end
+    
+    if enabled then
+        InfiniteJumpConnection = game:GetService("UserInputService").JumpRequest:Connect(function()
+            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid") then
+                LocalPlayer.Character:FindFirstChildOfClass("Humanoid"):ChangeState("Jumping")
+            end
+        end)
+        print("[INFINITE JUMP] Enabled")
+    else
+        print("[INFINITE JUMP] Disabled")
+    end
+end
+
+-- ========================================
+-- TWEEN SYSTEM
+-- System untuk movement yang smooth menggunakan tweening
+-- ========================================
+local ActiveTween
+local TweenCancelled = false
+
+local function tweenVehicleToPosition(vehicle, targetCFrame, speed)
+    if ActiveTween then
+        ActiveTween:Cancel()
+    end
+    
+    TweenCancelled = false
+    local distance = (vehicle.PrimaryPart.Position - targetCFrame.Position).Magnitude
+    local duration = distance / speed
+    
+    local tweenValue = Instance.new("CFrameValue")
+    tweenValue.Value = vehicle:GetPrimaryPartCFrame()
+    
+    tweenValue.Changed:Connect(function()
+        if TweenCancelled then return end
+        
+        local currentPos = tweenValue.Value.Position
+        GroundPart.Position = currentPos - Vector3.new(0, 14, 0)
+        
+        -- Posisikan kendaraan di atas ground dan arahkan ke target
+        vehicle:PivotTo(CFrame.new(
+            GroundPart.Position + Vector3.new(0, 7, 0),
+            targetCFrame.Position
+        ))
+        
+        -- Set velocity untuk movement yang natural
+        local direction = vehicle.PrimaryPart.CFrame.LookVector
+        vehicle.PrimaryPart.AssemblyLinearVelocity = direction * speed
+    end)
+    
+    local tweenInfo = TweenInfo.new(
+        duration,
+        Enum.EasingStyle.Linear,
+        Enum.EasingDirection.InOut
+    )
+    
+    ActiveTween = TweenService:Create(tweenValue, tweenInfo, {
+        Value = targetCFrame
+    })
+    
+    ActiveTween:Play()
+    ActiveTween.Completed:Wait()
+end
+
+local function tweenToDeliveryLocation(vehicle, targetModel)
+    if ActiveTween then
+        ActiveTween:Cancel()
+    end
+    
+    TweenCancelled = false
+    local targetCFrame = targetModel.WorldPivot + Vector3.new(0, 5, 0)
+    local distance = (vehicle.PrimaryPart.Position - targetCFrame.Position).Magnitude
+    local speed = Config.Speed
+    
+    local duration = distance / speed
+    local tweenValue = Instance.new("CFrameValue")
+    tweenValue.Value = vehicle:GetPrimaryPartCFrame()
+    
+    tweenValue.Changed:Connect(function()
+        if TweenCancelled then return end
+        
+        local currentPos = tweenValue.Value.Position
+        local distanceToTarget = LocalPlayer:DistanceFromCharacter(targetCFrame.Position)
+        
+        if distanceToTarget > 100 then
+            -- Jauh dari target: kecepatan penuh
+            GroundPart.Position = currentPos - Vector3.new(0, 14, 0)
+            vehicle:PivotTo(CFrame.new(
+                GroundPart.Position + Vector3.new(0, 7, 0),
+                targetCFrame.Position
+            ))
+            vehicle.PrimaryPart.AssemblyLinearVelocity = vehicle.PrimaryPart.CFrame.LookVector * speed
+            
+        elseif distanceToTarget > 10 then
+            -- Mendekat: perlambat
+            if not TweenCancelled then
+                TweenCancelled = true
+                if ActiveTween then ActiveTween:Cancel() end
+            end
+            
+            GroundPart.Position = currentPos - Vector3.new(0, 8, 0)
+            vehicle:PivotTo(CFrame.new(
+                GroundPart.Position + Vector3.new(0, 7, 0),
+                Vector3.new(targetCFrame.X, vehicle.PrimaryPart.CFrame.Y, targetCFrame.Z)
+            ))
+            vehicle.PrimaryPart.AssemblyLinearVelocity = vehicle.PrimaryPart.CFrame.LookVector * Config.TweenSpeed.Approach
+            
+        else
+            -- Sampai di target: stop
+            local lookAt = vehicle.PrimaryPart.CFrame * CFrame.new(0, 0, -10000)
+            vehicle:PivotTo(CFrame.new(
+                Vector3.new(targetCFrame.X, GroundPart.CFrame.Y + 7, targetCFrame.Z),
+                lookAt.Position
+            ))
+            vehicle.PrimaryPart.AssemblyLinearVelocity = Vector3.zero
+        end
+    end)
+    
+    local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut)
+    ActiveTween = TweenService:Create(tweenValue, tweenInfo, { Value = targetCFrame })
+    ActiveTween:Play()
+    
+    repeat task.wait()
+    until not targetModel:FindFirstChild("Highlight") or not Config.AutoDeliver or 
+          ActiveTween.PlaybackState == Enum.PlaybackState.Completed
+end
+
+-- ========================================
+-- AUTO FARM LOGIC
+-- Main logic untuk farming otomatis
+-- ========================================
+local FarmWaypoints = {
+    CFrame.new(105.419128, -26.0098934, 7965.37988, -3.36170197e-05, 0.951051414, -0.309032798, -1, -3.36170197e-05, 5.31971455e-06, -5.31971455e-06, 0.309032798, 0.951051414),
+    CFrame.new(2751.86499, -26.0098934, 3694.63354, 3.34978104e-05, 0.951051414, -0.309032798, -1, 3.34978104e-05, -5.31971455e-06, 5.31971455e-06, 0.309032798, 0.951051414),
+    CFrame.new(-8821.48438, -26.0098934, 2042.49939, -3.36170197e-05, 0.951051414, -0.309032798, -1, -3.36170197e-05, 5.31971455e-06, -5.31971455e-06, 0.309032798, 0.951051414),
+    CFrame.new(-6408.62109, -26.0098934, -727.765198, 3.34978104e-05, 0.951051414, -0.309032798, -1, 3.34978104e-05, -5.31971455e-06, 5.31971455e-06, 0.309032798, 0.951051414),
+    CFrame.new(-6099.79639, -26.00989345, -1027.94556, -3.36170197e-05, 0.951051414, -0.309032798, -1, -3.36170197e-05, 5.31971455e-06, -5.31971455e-06, 0.309032798, 0.951051414),
+    CFrame.new(-6066.70068, -26.0098934, 493.255524, 3.34978104e-05, 0.951051414, -0.309032798, -1, 3.34978104e-05, -5.31971455e-06, 5.31971455e-06, 0.309032798, 0.951051414),
+    CFrame.new(132.786133, -26.0098934, 15.2286377, 3.34978104e-05, 0.951051414, -0.309032798, -1, 3.34978104e-05, -5.31971455e-06, 5.31971455e-06, 0.309032798, 0.951051414),
+    CFrame.new(-7692.85449, -26.0098934, -4668.61963, -3.36170197e-05, 0.951051414, -0.309032798, -1, -3.36170197e-05, 5.31971455e-06, -5.31971455e-06, 0.309032798, 0.951051414),
+    CFrame.new(4887.24609, -26.0098934, 1222.96826, -3.36170197e-05, 0.951051414, -0.309032798, -1, -3.36170197e-05, 5.31971455e-06, -5.31971455e-06, 0.309032798, 0.951051414)
+}
+
+local function startAutoFarm()
+    hideWorkspaceObjects()
+    task.wait(0.5)
+    
+    while Config.AutoFarm do
+        local character = LocalPlayer.Character
+        if not character then break end
+        
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        if not humanoid or not humanoid.SeatPart then 
+            warn("[AUTO FARM] Not in a vehicle!")
+            break 
+        end
+        
+        local vehicle = humanoid.SeatPart.Parent
+        ensureGroundPart()
+        
+        -- Set primary part untuk pivot
+        vehicle.PrimaryPart = vehicle.Body:FindFirstChild("#Weight") or vehicle.PrimaryPart
+        
+        print("[AUTO FARM] Starting route with " .. #FarmWaypoints .. " waypoints")
+        
+        for i, waypoint in ipairs(FarmWaypoints) do
+            if not Config.AutoFarm then break end
+            
+            print("[AUTO FARM] Moving to waypoint " .. i .. "/" .. #FarmWaypoints)
+            local targetCFrame = waypoint + Vector3.new(0, 5, 0)
+            tweenVehicleToPosition(vehicle, targetCFrame, Config.Speed)
+            task.wait(0.1)
+        end
+        
+        print("[AUTO FARM] Completed route, restarting...")
+    end
+end
+
+-- ========================================
+-- AUTO DELIVER LOGIC
+-- Logic untuk deliver gift secara otomatis
+-- ========================================
+local function findNearestDeliveryLocation()
+    local nearestLocation = nil
+    local shortestDistance = math.huge
+    
+    for _, obj in pairs(workspace:GetChildren()) do
+        if obj.Name == "" and obj:FindFirstChild("Highlight") then
+            local distance = (LocalPlayer.Character.PrimaryPart.Position - obj.WorldPivot.Position).Magnitude
+            if distance < shortestDistance then
+                shortestDistance = distance
+                nearestLocation = obj
+            end
+        end
+    end
+    
+    return nearestLocation
+end
+
+local function startAutoDeliver()
+    hideWorkspaceObjects()
+    task.wait(0.5)
+    
+    while Config.AutoDeliver do
+        task.wait(0.1)
+        
+        local character = LocalPlayer.Character
+        if not character then break end
+        
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        if not humanoid or not humanoid.SeatPart then
+            warn("[AUTO DELIVER] Not in a vehicle!")
+            break
+        end
+        
+        local vehicle = humanoid.SeatPart.Parent
+        ensureGroundPart()
+        vehicle.PrimaryPart = vehicle.Body:FindFirstChild("#Weight") or vehicle.PrimaryPart
+        
+        local deliveryLocation = findNearestDeliveryLocation()
+        
+        if deliveryLocation then
+            print("[AUTO DELIVER] Found delivery location, moving...")
+            tweenToDeliveryLocation(vehicle, deliveryLocation)
+            
+        elseif workspace:FindFirstChild("GiftPickup") then
+            print("[AUTO DELIVER] Moving to gift pickup point")
+            repeat
+                task.wait()
+                vehicle.PrimaryPart.AssemblyLinearVelocity = Vector3.zero
+                vehicle:PivotTo(CFrame.new(workspace.GiftPickup.WorldPivot.Position) + Vector3.new(0, 5, 0))
+            until hasReachedMaxGifts(vehicle) or not Config.AutoDeliver
+            
+        else
+            warn("[AUTO DELIVER] No delivery locations or pickup points found")
+            task.wait(2)
+        end
+    end
+end
+
+-- ========================================
+-- GUI CREATION
+-- Membuat GUI yang lebih brutal dengan fitur lengkap
+-- ========================================
+local library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Schlabbadabadoo/RandomScripts/refs/heads/main/ui.lua", true))()
+local window = library:CreateWindow({
+    text = "🔥 MIDNIGHT CHASERS BRUTAL FARM 🔥"
+})
+
+-- Speed Control
+window:AddBox("Vehicle Speed (Default: 300)", function(object, focus)
+    if focus then
+        local speed = tonumber(object.Text)
+        if speed and speed > 0 then
+            Config.Speed = speed
+            print("[CONFIG] Speed set to: " .. speed)
+        end
+    end
 end)
 
---==================================================
--- VEHICLE DETECTOR
---==================================================
-local function getCar()
-	local char = plr.Character
-	if not char then return nil end
-
-	local hum = char:FindFirstChildOfClass("Humanoid")
-	if not hum or not hum.SeatPart then return nil end
-
-	local car = hum.SeatPart:FindFirstAncestorOfClass("Model")
-	if not car then return nil end
-
-	if not car.PrimaryPart then
-		local body = car:FindFirstChild("Body")
-		if body then
-			local w = body:FindFirstChild("#Weight")
-			if w then car.PrimaryPart = w end
-		end
-	end
-
-	return car
-end
-
---==================================================
--- GROUND (FOR TWEEN FARM)
---==================================================
-local function ensureGround()
-	if State.Ground then return end
-	local p = Instance.new("Part", workspace)
-	p.Anchored = true
-	p.Size = Vector3.new(10000,10,10000)
-	p.Transparency = 1
-	p.Name = "FarmGround"
-	State.Ground = p
-end
-
---==================================================
--- TWEEN MOVE (AUTO FARM)
---==================================================
-local function tweenMove(car, targetCF)
-	if State.Tween then
-		State.Tween:Cancel()
-	end
-
-	ensureGround()
-
-	local root = plr.Character.HumanoidRootPart
-	local dist = (root.Position - targetCF.Position).Magnitude
-	local duration = dist / State.Speed
-
-	local value = Instance.new("CFrameValue")
-	value.Value = car:GetPivot()
-
-	value.Changed:Connect(function(cf)
-		local pos = cf.Position
-		State.Ground.Position = pos - Vector3.new(0,14,0)
-		car:PivotTo(
-			CFrame.new(
-				State.Ground.Position + Vector3.new(0,7,0),
-				targetCF.Position
-			)
-		)
-		car.PrimaryPart.AssemblyLinearVelocity =
-			car.PrimaryPart.CFrame.LookVector * State.Speed
-	end)
-
-	State.Tween = TweenService:Create(
-		value,
-		TweenInfo.new(duration, Enum.EasingStyle.Linear),
-		{ Value = targetCF }
-	)
-
-	State.Tween:Play()
-	State.Tween.Completed:Wait()
-end
-
---==================================================
--- EVENT FINDER
---==================================================
-local function findNearestEvent()
-	local char = plr.Character
-	if not char or not char.PrimaryPart then return nil end
-
-	local closest, dist = nil, math.huge
-	for _, v in ipairs(workspace:GetChildren()) do
-		if v:IsA("Model") and v.Name == "" and v:FindFirstChild("Highlight") then
-			local d = (char.PrimaryPart.Position - v.WorldPivot.Position).Magnitude
-			if d < dist then
-				dist = d
-				closest = v
-			end
-		end
-	end
-	return closest
-end
-
---==================================================
--- TELEPORT (AUTO EVENT)
---==================================================
-local function teleportCar(car, pos)
-	car:PivotTo(CFrame.new(pos + Vector3.new(0,5,0)))
-end
-
---==================================================
--- MAIN LOOP (SINGLE LOOP, NO CHAOS)
---==================================================
-task.spawn(function()
-	local farmRoute = {
-		CFrame.new(105, -26, 7965),
-		CFrame.new(2751, -26, 3694),
-		CFrame.new(-8821, -26, 2042),
-	}
-
-	while true do
-		task.wait(0.2)
-
-		State.Car = getCar()
-		if not State.Car then continue end
-
-		-- AUTO EVENT (PRIORITY)
-		if State.AutoEvent then
-			if State.Tween then
-				State.Tween:Cancel()
-				State.Tween = nil
-			end
-
-			local event = findNearestEvent()
-			if event then
-				teleportCar(State.Car, event.WorldPivot.Position)
-				repeat
-					task.wait(0.5)
-				until not event:FindFirstChild("Highlight") or not State.AutoEvent
-			end
-			continue
-		end
-
-		-- AUTO FARM
-		if State.AutoFarm then
-			for _, cf in ipairs(farmRoute) do
-				if not State.AutoFarm or State.AutoEvent then break end
-				tweenMove(State.Car, cf + Vector3.new(0,5,0))
-			end
-		end
-	end
+-- Auto Farm Toggle
+window:AddToggle("Auto Farm", function(state)
+    Config.AutoFarm = state
+    
+    if state then
+        print("[AUTO FARM] Starting...")
+        task.spawn(startAutoFarm)
+    else
+        print("[AUTO FARM] Stopped")
+        if ActiveTween then ActiveTween:Cancel() end
+        restoreWorkspaceObjects()
+    end
 end)
 
---==================================================
--- GUI (SIMPLE & LIGHT)
---==================================================
-local gui = Instance.new("ScreenGui", plr.PlayerGui)
-gui.ResetOnSpawn = false
-
-local frame = Instance.new("Frame", gui)
-frame.Position = UDim2.fromScale(0.02,0.25)
-frame.Size = UDim2.fromOffset(230,170)
-frame.BackgroundColor3 = Color3.fromRGB(20,20,20)
-frame.BorderSizePixel = 0
-Instance.new("UICorner", frame)
-
-local title = Instance.new("TextLabel", frame)
-title.Size = UDim2.fromOffset(230,30)
-title.Text = "Farm Controller"
-title.BackgroundTransparency = 1
-title.TextColor3 = Color3.new(1,1,1)
-title.Font = Enum.Font.GothamBold
-title.TextSize = 14
-
-local function makeBtn(label, y)
-	local b = Instance.new("TextButton", frame)
-	b.Position = UDim2.fromOffset(20,y)
-	b.Size = UDim2.fromOffset(190,35)
-	b.Text = label .. ": OFF"
-	b.BackgroundColor3 = Color3.fromRGB(170,0,0)
-	b.TextColor3 = Color3.new(1,1,1)
-	b.Font = Enum.Font.Gotham
-	b.TextSize = 14
-	Instance.new("UICorner", b)
-	return b
-end
-
-local farmBtn = makeBtn("Auto Farm", 40)
-local eventBtn = makeBtn("Auto Event", 85)
-
-farmBtn.MouseButton1Click:Connect(function()
-	State.AutoFarm = not State.AutoFarm
-	farmBtn.Text = "Auto Farm: " .. (State.AutoFarm and "ON" or "OFF")
-	farmBtn.BackgroundColor3 =
-		State.AutoFarm and Color3.fromRGB(0,170,0) or Color3.fromRGB(170,0,0)
+-- Auto Deliver Toggle
+window:AddToggle("Auto Deliver [Event]", function(state)
+    Config.AutoDeliver = state
+    
+    if state then
+        print("[AUTO DELIVER] Starting...")
+        task.spawn(startAutoDeliver)
+    else
+        print("[AUTO DELIVER] Stopped")
+        if ActiveTween then ActiveTween:Cancel() end
+        restoreWorkspaceObjects()
+    end
 end)
 
-eventBtn.MouseButton1Click:Connect(function()
-	State.AutoEvent = not State.AutoEvent
-	eventBtn.Text = "Auto Event: " .. (State.AutoEvent and "ON" or "OFF")
-	eventBtn.BackgroundColor3 =
-		State.AutoEvent and Color3.fromRGB(0,170,0) or Color3.fromRGB(170,0,0)
+-- NoClip Toggle (BRUTAL FEATURE)
+window:AddToggle("NoClip (Pass Through Walls)", function(state)
+    Config.NoClip = state
+    toggleNoClip(state)
 end)
 
-print("[Farm Controller] READY")
+-- Infinite Jump Toggle (BRUTAL FEATURE)
+window:AddToggle("Infinite Jump", function(state)
+    Config.InfiniteJump = state
+    toggleInfiniteJump(state)
+end)
+
+-- Anti-AFK Toggle
+window:AddToggle("Anti-AFK (Default: ON)", function(state)
+    Config.AntiAFK = state
+    print("[ANTI-AFK] " .. (state and "Enabled" or "Disabled"))
+end)
+
+-- Emergency Stop Button
+window:AddButton("⛔ EMERGENCY STOP ALL", function()
+    print("[EMERGENCY] Stopping all features...")
+    Config.AutoFarm = false
+    Config.AutoDeliver = false
+    Config.NoClip = false
+    Config.InfiniteJump = false
+    
+    if ActiveTween then ActiveTween:Cancel() end
+    toggleNoClip(false)
+    toggleInfiniteJump(false)
+    restoreWorkspaceObjects()
+    
+    print("[EMERGENCY] All features stopped!")
+end)
+
+-- ========================================
+-- INITIALIZATION
+-- ========================================
+print("===========================================")
+print("MIDNIGHT CHASERS BRUTAL FARM - INITIALIZED")
+print("===========================================")
+
+initializeStreaming()
+setupAntiAFK()
+
+print("[READY] Script loaded successfully!")
+print("[INFO] Use the GUI to control features")
+print("===========================================")
