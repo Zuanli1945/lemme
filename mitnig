@@ -1,6 +1,6 @@
---////////////////////////////////////////////////////
--- AUTO FARM CONTROLLER (REFINED)
---////////////////////////////////////////////////////
+--==================================================
+-- AUTO FARM + AUTO EVENT (COMBINED CONTROLLER)
+--==================================================
 
 -- SERVICES
 local Players = game:GetService("Players")
@@ -9,44 +9,33 @@ local VirtualUser = game:GetService("VirtualUser")
 
 local plr = Players.LocalPlayer
 
---====================================================
+--==================================================
 -- STATE
---====================================================
+--==================================================
 local State = {
 	AutoFarm = false,
+	AutoEvent = false,
 	Speed = 250,
 	Car = nil,
 	Tween = nil,
 	Ground = nil,
 }
 
---====================================================
+--==================================================
 -- ANTI AFK
---====================================================
+--==================================================
 plr.Idled:Connect(function()
 	VirtualUser:CaptureController()
 	VirtualUser:ClickButton2(Vector2.new())
 end)
 
---====================================================
--- GROUND ENSURE
---====================================================
-local function ensureGround()
-	if State.Ground then return end
-	local p = Instance.new("Part", workspace)
-	p.Anchored = true
-	p.Size = Vector3.new(10000, 10, 10000)
-	p.Transparency = 1
-	p.Name = "FarmGround"
-	State.Ground = p
-end
-
---====================================================
--- VEHICLE
---====================================================
+--==================================================
+-- VEHICLE DETECTOR
+--==================================================
 local function getCar()
 	local char = plr.Character
 	if not char then return nil end
+
 	local hum = char:FindFirstChildOfClass("Humanoid")
 	if not hum or not hum.SeatPart then return nil end
 
@@ -64,27 +53,32 @@ local function getCar()
 	return car
 end
 
---====================================================
--- STREAMING
---====================================================
-local function streamAround(pos)
-	pcall(function()
-		plr:RequestStreamAroundAsync(pos, 3)
-	end)
+--==================================================
+-- GROUND (FOR TWEEN FARM)
+--==================================================
+local function ensureGround()
+	if State.Ground then return end
+	local p = Instance.new("Part", workspace)
+	p.Anchored = true
+	p.Size = Vector3.new(10000,10,10000)
+	p.Transparency = 1
+	p.Name = "FarmGround"
+	State.Ground = p
 end
 
---====================================================
--- TWEEN MOVE (HYBRID)
---====================================================
-local function moveTo(car, targetCF)
+--==================================================
+-- TWEEN MOVE (AUTO FARM)
+--==================================================
+local function tweenMove(car, targetCF)
 	if State.Tween then
 		State.Tween:Cancel()
-		State.Tween = nil
 	end
+
+	ensureGround()
 
 	local root = plr.Character.HumanoidRootPart
 	local dist = (root.Position - targetCF.Position).Magnitude
-	local time = dist / State.Speed
+	local duration = dist / State.Speed
 
 	local value = Instance.new("CFrameValue")
 	value.Value = car:GetPivot()
@@ -92,17 +86,19 @@ local function moveTo(car, targetCF)
 	value.Changed:Connect(function(cf)
 		local pos = cf.Position
 		State.Ground.Position = pos - Vector3.new(0,14,0)
-		car:PivotTo(CFrame.new(
-			State.Ground.Position + Vector3.new(0,7,0),
-			targetCF.Position
-		))
+		car:PivotTo(
+			CFrame.new(
+				State.Ground.Position + Vector3.new(0,7,0),
+				targetCF.Position
+			)
+		)
 		car.PrimaryPart.AssemblyLinearVelocity =
 			car.PrimaryPart.CFrame.LookVector * State.Speed
 	end)
 
 	State.Tween = TweenService:Create(
 		value,
-		TweenInfo.new(time, Enum.EasingStyle.Linear),
+		TweenInfo.new(duration, Enum.EasingStyle.Linear),
 		{ Value = targetCF }
 	)
 
@@ -110,73 +106,125 @@ local function moveTo(car, targetCF)
 	State.Tween.Completed:Wait()
 end
 
---====================================================
--- MAIN FARM LOOP
---====================================================
+--==================================================
+-- EVENT FINDER
+--==================================================
+local function findNearestEvent()
+	local char = plr.Character
+	if not char or not char.PrimaryPart then return nil end
+
+	local closest, dist = nil, math.huge
+	for _, v in ipairs(workspace:GetChildren()) do
+		if v:IsA("Model") and v.Name == "" and v:FindFirstChild("Highlight") then
+			local d = (char.PrimaryPart.Position - v.WorldPivot.Position).Magnitude
+			if d < dist then
+				dist = d
+				closest = v
+			end
+		end
+	end
+	return closest
+end
+
+--==================================================
+-- TELEPORT (AUTO EVENT)
+--==================================================
+local function teleportCar(car, pos)
+	car:PivotTo(CFrame.new(pos + Vector3.new(0,5,0)))
+end
+
+--==================================================
+-- MAIN LOOP (SINGLE LOOP, NO CHAOS)
+--==================================================
 task.spawn(function()
+	local farmRoute = {
+		CFrame.new(105, -26, 7965),
+		CFrame.new(2751, -26, 3694),
+		CFrame.new(-8821, -26, 2042),
+	}
+
 	while true do
-		task.wait()
-		if not State.AutoFarm then continue end
+		task.wait(0.2)
 
 		State.Car = getCar()
 		if not State.Car then continue end
 
-		ensureGround()
+		-- AUTO EVENT (PRIORITY)
+		if State.AutoEvent then
+			if State.Tween then
+				State.Tween:Cancel()
+				State.Tween = nil
+			end
 
-		-- contoh route (ganti sesuai map kamu)
-		local points = {
-			CFrame.new(105, -26, 7965),
-			CFrame.new(2751, -26, 3694),
-			CFrame.new(-8821, -26, 2042),
-		}
+			local event = findNearestEvent()
+			if event then
+				teleportCar(State.Car, event.WorldPivot.Position)
+				repeat
+					task.wait(0.5)
+				until not event:FindFirstChild("Highlight") or not State.AutoEvent
+			end
+			continue
+		end
 
-		for _, cf in ipairs(points) do
-			if not State.AutoFarm then break end
-			streamAround(cf.Position)
-			moveTo(State.Car, cf + Vector3.new(0,5,0))
+		-- AUTO FARM
+		if State.AutoFarm then
+			for _, cf in ipairs(farmRoute) do
+				if not State.AutoFarm or State.AutoEvent then break end
+				tweenMove(State.Car, cf + Vector3.new(0,5,0))
+			end
 		end
 	end
 end)
 
---====================================================
--- GUI (LIGHTWEIGHT)
---====================================================
+--==================================================
+-- GUI (SIMPLE & LIGHT)
+--==================================================
 local gui = Instance.new("ScreenGui", plr.PlayerGui)
 gui.ResetOnSpawn = false
 
 local frame = Instance.new("Frame", gui)
 frame.Position = UDim2.fromScale(0.02,0.25)
-frame.Size = UDim2.fromOffset(200,120)
-frame.BackgroundColor3 = Color3.fromRGB(25,25,25)
+frame.Size = UDim2.fromOffset(230,170)
+frame.BackgroundColor3 = Color3.fromRGB(20,20,20)
 frame.BorderSizePixel = 0
-Instance.new("UICorner", frame).CornerRadius = UDim.new(0,10)
+Instance.new("UICorner", frame)
 
 local title = Instance.new("TextLabel", frame)
-title.Size = UDim2.fromOffset(200,30)
-title.Text = "Auto Farm"
+title.Size = UDim2.fromOffset(230,30)
+title.Text = "Farm Controller"
 title.BackgroundTransparency = 1
 title.TextColor3 = Color3.new(1,1,1)
 title.Font = Enum.Font.GothamBold
 title.TextSize = 14
 
-local toggle = Instance.new("TextButton", frame)
-toggle.Position = UDim2.fromOffset(20,40)
-toggle.Size = UDim2.fromOffset(160,30)
-toggle.Text = "OFF"
-toggle.BackgroundColor3 = Color3.fromRGB(170,0,0)
-toggle.TextColor3 = Color3.new(1,1,1)
-toggle.Font = Enum.Font.Gotham
-toggle.TextSize = 14
-Instance.new("UICorner", toggle)
+local function makeBtn(label, y)
+	local b = Instance.new("TextButton", frame)
+	b.Position = UDim2.fromOffset(20,y)
+	b.Size = UDim2.fromOffset(190,35)
+	b.Text = label .. ": OFF"
+	b.BackgroundColor3 = Color3.fromRGB(170,0,0)
+	b.TextColor3 = Color3.new(1,1,1)
+	b.Font = Enum.Font.Gotham
+	b.TextSize = 14
+	Instance.new("UICorner", b)
+	return b
+end
 
-toggle.MouseButton1Click:Connect(function()
+local farmBtn = makeBtn("Auto Farm", 40)
+local eventBtn = makeBtn("Auto Event", 85)
+
+farmBtn.MouseButton1Click:Connect(function()
 	State.AutoFarm = not State.AutoFarm
-	toggle.Text = State.AutoFarm and "ON" or "OFF"
-	toggle.BackgroundColor3 =
-		State.AutoFarm and Color3.fromRGB(0,170,0)
-		or Color3.fromRGB(170,0,0)
-
-	if not State.AutoFarm and State.Tween then
-		State.Tween:Cancel()
-	end
+	farmBtn.Text = "Auto Farm: " .. (State.AutoFarm and "ON" or "OFF")
+	farmBtn.BackgroundColor3 =
+		State.AutoFarm and Color3.fromRGB(0,170,0) or Color3.fromRGB(170,0,0)
 end)
+
+eventBtn.MouseButton1Click:Connect(function()
+	State.AutoEvent = not State.AutoEvent
+	eventBtn.Text = "Auto Event: " .. (State.AutoEvent and "ON" or "OFF")
+	eventBtn.BackgroundColor3 =
+		State.AutoEvent and Color3.fromRGB(0,170,0) or Color3.fromRGB(170,0,0)
+end)
+
+print("[Farm Controller] READY")
