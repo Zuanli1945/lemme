@@ -1,72 +1,127 @@
--- ========================================
--- MIDNIGHT CHASERS FARM SCRIPT - ENHANCED & FIXED
--- Fixed delivery issues and added draggable GUI
--- ========================================
+-- Midnight Chasers Farming Script - Toggle System
+-- Improved with better toggle controls
 
 local Players = game:GetService("Players")
-local TweenService = game:GetService("TweenService")
-local VirtualUser = game:GetService("VirtualUser")
+local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
+local VirtualUser = game:GetService("VirtualUser")
 
-local LocalPlayer = Players.LocalPlayer
+local Player = Players.LocalPlayer
+local Character = Player.Character or Player.CharacterAdded:Wait()
+local Humanoid = Character:WaitForChild("Humanoid")
 
--- ========================================
--- CONFIGURATION
--- ========================================
+-- Anti-AFK
+warn("Anti AFK launching")
+Player.Idled:Connect(function()
+    warn("Anti AFK launched successfully!!!")
+    VirtualUser:CaptureController()
+    VirtualUser:ClickButton2(Vector2.new())
+end)
+
+-- Global Variables
 local Config = {
-    Speed = 300,
-    AutoFarm = false,
-    AutoDeliver = false,
-    AntiAFK = true,
-    NoClip = false,
-    InfiniteJump = false,
-    StreamRadius = 3,
-    TweenSpeed = {
-        Fast = 500,
-        Normal = 300,
-        Slow = 150,
-        Approach = 35  -- Saya naikkan dari 20 ke 35 untuk lebih stabil
+    Speed = 230,
+    AutoFarmActive = false,
+    AutoDeliverActive = false,
+    StreamAllActive = false,
+    HideObjectsActive = false
+}
+
+-- Toggle Managers
+local ToggleManagers = {
+    AutoFarm = {
+        Running = false,
+        Thread = nil,
+        CancelFlag = false
+    },
+    AutoDeliver = {
+        Running = false,
+        Thread = nil,
+        CancelFlag = false
     }
 }
 
--- ========================================
--- STREAMING OPTIMIZATION
--- ========================================
-local function initializeStreaming()
-    task.spawn(function()
-        for _, model in pairs(workspace:GetDescendants()) do
-            if model:IsA("Model") then
-                task.spawn(function()
-                    pcall(function()
-                        LocalPlayer:RequestStreamAroundAsync(model.WorldPivot.Position, Config.StreamRadius)
-                    end)
-                end)
-                task.wait(0.01)
-            end
+-- Cache
+local CurrentTween = nil
+local GroundPart = nil
+local BackupFolder = nil
+local CurrentCar = nil
+
+-- UI Library
+local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Schlabbadabadoo/RandomScripts/refs/heads/main/ui.lua", true))()
+
+-- Main Window
+local MainWindow = Library:CreateWindow({
+    text = "Midnight Chasers Farm Menu v2.1"
+})
+
+-- Functions for Toggle Management
+local function StopToggle(toggleName)
+    if ToggleManagers[toggleName] then
+        ToggleManagers[toggleName].CancelFlag = true
+        ToggleManagers[toggleName].Running = false
+        Config[toggleName .. "Active"] = false
+        
+        -- Cancel any active tween
+        if CurrentTween then
+            CurrentTween:Cancel()
+            CurrentTween = nil
         end
-        print("[STREAMING] All areas loaded")
+        
+        -- Stop vehicle movement
+        if CurrentCar and CurrentCar.PrimaryPart then
+            CurrentCar.PrimaryPart.AssemblyLinearVelocity = Vector3.zero
+        end
+        
+        warn(toggleName .. " stopped!")
+    end
+end
+
+local function StartToggle(toggleName, func)
+    -- Stop if already running
+    if ToggleManagers[toggleName].Running then
+        StopToggle(toggleName)
+        return false
+    end
+    
+    -- Reset flags
+    ToggleManagers[toggleName].CancelFlag = false
+    ToggleManagers[toggleName].Running = true
+    Config[toggleName .. "Active"] = true
+    
+    -- Start in new thread
+    ToggleManagers[toggleName].Thread = task.spawn(function()
+        func()
+        ToggleManagers[toggleName].Running = false
+        Config[toggleName .. "Active"] = false
+    end)
+    
+    warn(toggleName .. " started!")
+    return true
+end
+
+-- Basic Functions
+local function RequestStreamAround(position, radius)
+    pcall(function()
+        Player:RequestStreamAroundAsync(position, radius)
     end)
 end
 
--- ========================================
--- ANTI-AFK SYSTEM
--- ========================================
-local function setupAntiAFK()
-    LocalPlayer.Idled:Connect(function()
-        if Config.AntiAFK then
-            warn("[ANTI-AFK] Triggered - keeping you active")
-            VirtualUser:CaptureController()
-            VirtualUser:ClickButton2(Vector2.new())
+local function StreamAllModels()
+    for _, model in pairs(Workspace:GetDescendants()) do
+        if model:IsA("Model") and model.PrimaryPart then
+            RequestStreamAround(model.PrimaryPart.Position, 3)
+            task.wait(0.05)
         end
-    end)
-    print("[ANTI-AFK] System initialized")
+    end
+    warn("All models streamed!")
 end
 
--- ========================================
--- GIFT DETECTION
--- ========================================
-local function hasReachedMaxGifts(vehicle)
+local function ReachedMax(vehicle)
+    if not vehicle:FindFirstChild("Gifts") then return false end
+    
     local seatCount = 0
     for _, descendant in pairs(vehicle:GetDescendants()) do
         if descendant:IsA("Seat") then
@@ -74,671 +129,438 @@ local function hasReachedMaxGifts(vehicle)
         end
     end
     
-    local maxGifts = seatCount * 5
-    local giftsFolder = vehicle:FindFirstChild("Gifts")
-    
-    if giftsFolder then
-        return #giftsFolder:GetChildren() >= maxGifts
-    end
-    return false
+    return #vehicle.Gifts:GetChildren() >= (seatCount * 5)
 end
 
--- ========================================
--- WORKSPACE MANAGEMENT
--- ========================================
-local BackupFolder
-
-local function hideWorkspaceObjects()
+local function HideOtherObjects()
     if not BackupFolder then
-        BackupFolder = Instance.new("Folder")
-        BackupFolder.Name = "OptimizationBackup"
-        BackupFolder.Parent = ReplicatedStorage
+        BackupFolder = Instance.new("Folder", ReplicatedStorage)
+        BackupFolder.Name = "MRBackupFolder_" .. Player.UserId
     end
     
     local hiddenCount = 0
-    for _, obj in pairs(workspace:GetChildren()) do
-        local shouldHide = (
-            (obj:IsA("Model") or obj:IsA("Folder")) and
-            not string.find(obj.Name, LocalPlayer.Name) and
-            not string.find(obj.Name, LocalPlayer.DisplayName) and
-            not string.find(obj.Name, "Gift") and
-            obj.Name ~= ""
-        ) or obj:IsA("MeshPart")
-        
-        if shouldHide then
-            obj.Parent = BackupFolder
-            hiddenCount = hiddenCount + 1
+    for _, obj in pairs(Workspace:GetChildren()) do
+        if obj ~= Character and not obj:IsDescendantOf(Character) then
+            if (obj:IsA("Model") or obj:IsA("Folder")) and 
+               not string.find(obj.Name:lower(), Player.Name:lower()) and
+               not string.find(obj.Name:lower(), Player.DisplayName:lower()) and
+               not string.find(obj.Name:lower(), "gift") and
+               obj.Name ~= "" then
+                obj.Parent = BackupFolder
+                hiddenCount = hiddenCount + 1
+            elseif obj:IsA("MeshPart") or (obj:IsA("Part") and obj.Name ~= "GroundPlatform") then
+                obj.Parent = BackupFolder
+                hiddenCount = hiddenCount + 1
+            end
         end
     end
-    print("[OPTIMIZATION] Hidden " .. hiddenCount .. " objects for better performance")
+    
+    warn(hiddenCount .. " objects hidden")
+    return hiddenCount
 end
 
-local function restoreWorkspaceObjects()
+local function RestoreObjects()
     if BackupFolder then
+        local restored = 0
         for _, obj in pairs(BackupFolder:GetChildren()) do
-            obj.Parent = workspace
+            obj.Parent = Workspace
+            restored = restored + 1
             task.wait(0.01)
         end
-        print("[OPTIMIZATION] Restored all objects")
+        warn(restored .. " objects restored")
     end
 end
 
--- ========================================
--- IMPROVED GROUND CREATION
--- FIX: Ground part sekarang lebih besar dan lebih stabil
--- ========================================
-local GroundPart
+local function CreateGroundPart()
+    if GroundPart and GroundPart.Parent then
+        GroundPart:Destroy()
+    end
+    
+    GroundPart = Instance.new("Part")
+    GroundPart.Name = "GroundPlatform"
+    GroundPart.Anchored = true
+    GroundPart.CanCollide = false
+    GroundPart.Transparency = 0.5
+    GroundPart.Color = Color3.fromRGB(0, 255, 0)
+    GroundPart.Material = Enum.Material.Neon
+    GroundPart.Size = Vector3.new(200, 5, 200)
+    GroundPart.Parent = Workspace
+    
+    return GroundPart
+end
 
-local function ensureGroundPart()
-    if not GroundPart or not GroundPart.Parent then
-        -- Hapus ground part lama jika ada
+local function GetCurrentVehicle()
+    if not Character or not Humanoid then return nil end
+    
+    local seat = Humanoid.SeatPart
+    if not seat then return nil end
+    
+    local vehicle = seat.Parent
+    if vehicle:IsA("Model") then
+        -- Try to find primary part
+        if not vehicle.PrimaryPart then
+            local body = vehicle:FindFirstChild("Body")
+            if body then
+                local weight = body:FindFirstChild("#Weight")
+                if weight then
+                    vehicle.PrimaryPart = weight
+                end
+            end
+        end
+        return vehicle
+    end
+    
+    return nil
+end
+
+local function TweenToCFrame(targetCFrame, speed)
+    if not CurrentCar or not CurrentCar.PrimaryPart then return end
+    
+    local startCF = CurrentCar:GetPrimaryPartCFrame()
+    local distance = (startCF.Position - targetCFrame.Position).Magnitude
+    local duration = distance / math.max(speed, 1)
+    
+    if not GroundPart then
+        CreateGroundPart()
+    end
+    
+    local startTime = tick()
+    local completed = false
+    
+    while not completed and not ToggleManagers.AutoFarm.CancelFlag and not ToggleManagers.AutoDeliver.CancelFlag do
+        if not CurrentCar or not CurrentCar.PrimaryPart then break end
+        
+        local elapsed = tick() - startTime
+        local progress = math.min(elapsed / duration, 1)
+        
+        if progress >= 1 then
+            completed = true
+            break
+        end
+        
+        -- Interpolate position
+        local newPos = startCF.Position:Lerp(targetCFrame.Position, progress)
+        local lookDir = (targetCFrame.Position - newPos).Unit
+        
+        -- Update ground
+        GroundPart.Position = newPos - Vector3.new(0, 10, 0)
+        
+        -- Update vehicle
+        local newCFrame = CFrame.new(newPos, newPos + lookDir)
+        CurrentCar:PivotTo(newCFrame)
+        
+        -- Apply velocity
+        CurrentCar.PrimaryPart.AssemblyLinearVelocity = lookDir * speed
+        
+        RunService.Heartbeat:Wait()
+    end
+    
+    -- Stop at the end
+    if CurrentCar and CurrentCar.PrimaryPart then
+        CurrentCar.PrimaryPart.AssemblyLinearVelocity = Vector3.zero
+    end
+end
+
+local function FindNearestGiftLocation()
+    local nearest = nil
+    local minDistance = math.huge
+    
+    for _, obj in pairs(Workspace:GetChildren()) do
+        if obj.Name == "" and obj:FindFirstChild("Highlight") and obj.PrimaryPart then
+            local distance = (Character.PrimaryPart.Position - obj.PrimaryPart.Position).Magnitude
+            if distance < minDistance then
+                minDistance = distance
+                nearest = obj
+            end
+        end
+    end
+    
+    return nearest
+end
+
+-- Auto Farm Route
+local FarmRoutes = {
+    CFrame.new(105.419128, -16.0098934, 7965.37988),
+    CFrame.new(2751.86499, -16.0098934, 3694.63354),
+    CFrame.new(-8821.48438, -16.0098934, 2042.49939),
+    CFrame.new(-6408.62109, -16.0098934, -727.765198),
+    CFrame.new(-6099.79639, -16.00989345, -1027.94556),
+    CFrame.new(-6066.70068, -16.0098934, 493.255524),
+    CFrame.new(132.786133, -16.0098934, 15.2286377),
+    CFrame.new(-7692.85449, -16.0098934, -4668.61963),
+    CFrame.new(4887.24609, -16.0098934, 1222.96826)
+}
+
+-- GUI Elements with Toggle System
+MainWindow:AddToggle("Stream All Models", function(state)
+    if state then
+        task.spawn(StreamAllModels)
+    else
+        warn("Streaming completed or cancelled")
+    end
+end)
+
+MainWindow:AddSlider("Vehicle Speed", 50, 500, 230, function(value)
+    Config.Speed = value
+    warn("Speed set to: " .. value)
+end)
+
+local hideToggle = MainWindow:AddToggle("Hide Other Objects", function(state)
+    Config.HideObjectsActive = state
+    if state then
+        HideOtherObjects()
+    else
+        RestoreObjects()
+    end
+end)
+
+local autoFarmToggle = MainWindow:AddToggle("Auto Farm Route", function(state)
+    if state then
+        -- Start Auto Farm
+        StartToggle("AutoFarm", function()
+            -- Stop other toggles
+            if ToggleManagers.AutoDeliver.Running then
+                StopToggle("AutoDeliver")
+            end
+            
+            -- Initial setup
+            CurrentCar = GetCurrentVehicle()
+            if not CurrentCar then
+                warn("No vehicle found! Please enter a vehicle first.")
+                StopToggle("AutoFarm")
+                return
+            end
+            
+            if Config.HideObjectsActive then
+                HideOtherObjects()
+            end
+            
+            CreateGroundPart()
+            
+            -- Main farming loop
+            while ToggleManagers.AutoFarm.Running and not ToggleManagers.AutoFarm.CancelFlag do
+                for _, route in ipairs(FarmRoutes) do
+                    if ToggleManagers.AutoFarm.CancelFlag or not ToggleManagers.AutoFarm.Running then
+                        break
+                    end
+                    
+                    -- Add height offset
+                    local targetCF = route + Vector3.new(0, 5, 0)
+                    
+                    warn("Moving to point " .. _ .. " of " .. #FarmRoutes)
+                    TweenToCFrame(targetCF, Config.Speed)
+                    
+                    -- Small pause at each point
+                    for i = 1, 10 do
+                        if ToggleManagers.AutoFarm.CancelFlag then break end
+                        task.wait(0.1)
+                    end
+                end
+                
+                if not ToggleManagers.AutoFarm.CancelFlag then
+                    warn("Route completed! Starting again...")
+                end
+            end
+            
+            -- Cleanup
+            if GroundPart then
+                GroundPart:Destroy()
+                GroundPart = nil
+            end
+            
+            if not Config.HideObjectsActive then
+                RestoreObjects()
+            end
+        end)
+    else
+        -- Stop Auto Farm
+        StopToggle("AutoFarm")
+    end
+end)
+
+local autoDeliverToggle = MainWindow:AddToggle("Auto Deliver (Event)", function(state)
+    if state then
+        -- Start Auto Deliver
+        StartToggle("AutoDeliver", function()
+            -- Stop other toggles
+            if ToggleManagers.AutoFarm.Running then
+                StopToggle("AutoFarm")
+            end
+            
+            -- Initial setup
+            CurrentCar = GetCurrentVehicle()
+            if not CurrentCar then
+                warn("No vehicle found! Please enter a vehicle first.")
+                StopToggle("AutoDeliver")
+                return
+            end
+            
+            if Config.HideObjectsActive then
+                HideOtherObjects()
+            end
+            
+            CreateGroundPart()
+            
+            -- Main delivery loop
+            while ToggleManagers.AutoDeliver.Running and not ToggleManagers.AutoDeliver.CancelFlag do
+                CurrentCar = GetCurrentVehicle()
+                if not CurrentCar then
+                    task.wait(1)
+                    continue
+                end
+                
+                -- Check if vehicle is full
+                if ReachedMax(CurrentCar) then
+                    -- Go to gift pickup
+                    local giftPickup = Workspace:FindFirstChild("GiftPickup")
+                    if giftPickup then
+                        warn("Vehicle full! Delivering to gift pickup...")
+                        local targetCF = CFrame.new(giftPickup.Position) + Vector3.new(0, 5, 0)
+                        TweenToCFrame(targetCF, 100)
+                        
+                        -- Wait for delivery animation
+                        for i = 1, 30 do
+                            if ToggleManagers.AutoDeliver.CancelFlag then break end
+                            task.wait(0.1)
+                        end
+                    end
+                else
+                    -- Find and collect gifts
+                    local nearestGift = FindNearestGiftLocation()
+                    if nearestGift then
+                        warn("Found gift! Moving to collect...")
+                        local targetCF = nearestGift:GetPrimaryPartCFrame() + Vector3.new(0, 5, 0)
+                        TweenToCFrame(targetCF, Config.Speed)
+                        
+                        -- Wait at gift location
+                        for i = 1, 10 do
+                            if ToggleManagers.AutoDeliver.CancelFlag then break end
+                            task.wait(0.1)
+                        end
+                    else
+                        warn("No gifts found, waiting...")
+                        task.wait(2)
+                    end
+                end
+            end
+            
+            -- Cleanup
+            if GroundPart then
+                GroundPart:Destroy()
+                GroundPart = nil
+            end
+            
+            if not Config.HideObjectsActive then
+                RestoreObjects()
+            end
+        end)
+    else
+        -- Stop Auto Deliver
+        StopToggle("AutoDeliver")
+    end
+end)
+
+MainWindow:AddButton("Force Stop All", function()
+    -- Stop all active toggles
+    for toggleName, manager in pairs(ToggleManagers) do
+        if manager.Running then
+            StopToggle(toggleName)
+        end
+    end
+    
+    -- Cleanup
+    if GroundPart then
+        GroundPart:Destroy()
+        GroundPart = nil
+    end
+    
+    RestoreObjects()
+    
+    warn("All farming activities stopped!")
+end)
+
+MainWindow:AddButton("Teleport to Gift Pickup", function()
+    local giftPickup = Workspace:FindFirstChild("GiftPickup")
+    if giftPickup and Character and Character.PrimaryPart then
+        Character.PrimaryPart.CFrame = giftPickup.CFrame + Vector3.new(0, 5, 0)
+        warn("Teleported to gift pickup!")
+    else
+        warn("Gift pickup not found!")
+    end
+end)
+
+MainWindow:AddButton("Refresh Vehicle", function()
+    CurrentCar = GetCurrentVehicle()
+    if CurrentCar then
+        warn("Current vehicle: " .. CurrentCar.Name)
+        
+        -- Set primary part if needed
+        if not CurrentCar.PrimaryPart then
+            local body = CurrentCar:FindFirstChild("Body")
+            if body then
+                local weight = body:FindFirstChild("#Weight")
+                if weight then
+                    CurrentCar.PrimaryPart = weight
+                    warn("Primary part set to #Weight")
+                end
+            end
+        end
+    else
+        warn("No vehicle detected!")
+    end
+end)
+
+-- Status display
+MainWindow:AddLabel("Status: Ready")
+MainWindow:AddLabel("Current Speed: " .. Config.Speed)
+
+-- Auto-update status
+task.spawn(function()
+    while true do
+        local status = "Idle"
+        if ToggleManagers.AutoFarm.Running then
+            status = "Auto Farming"
+        elseif ToggleManagers.AutoDeliver.Running then
+            status = "Auto Delivering"
+        end
+        
+        -- Update UI status (you might need to modify the library to support updating labels)
+        warn("Status: " .. status)
+        
+        task.wait(2)
+    end
+end)
+
+-- Initialize
+warn("======================================")
+warn("Midnight Chasers Farm Script Loaded!")
+warn("Player: " .. Player.Name)
+warn("Speed: " .. Config.Speed)
+warn("======================================")
+warn("Instructions:")
+warn("1. Enter a vehicle first")
+warn("2. Toggle Auto Farm to start/stop farming")
+warn("3. Toggle Auto Deliver to start/stop delivering")
+warn("4. Use 'Force Stop All' for emergency stop")
+warn("======================================")
+
+-- Cleanup on game leave
+game:GetService("Players").PlayerRemoving:Connect(function(leavingPlayer)
+    if leavingPlayer == Player then
+        -- Stop all toggles
+        for toggleName, manager in pairs(ToggleManagers) do
+            if manager.Running then
+                StopToggle(toggleName)
+            end
+        end
+        
+        -- Cleanup objects
         if GroundPart then
             GroundPart:Destroy()
         end
         
-        -- Buat ground part baru yang lebih besar dan lebih reliable
-        GroundPart = Instance.new("Part")
-        GroundPart.Name = "FarmGroundPlatform"
-        GroundPart.Anchored = true
-        GroundPart.Size = Vector3.new(20000, 15, 20000)  -- Lebih besar untuk coverage lebih baik
-        GroundPart.Transparency = 1
-        GroundPart.CanCollide = true  -- Saya ubah jadi true agar kendaraan punya surface untuk berdiri
-        GroundPart.Material = Enum.Material.SmoothPlastic
-        GroundPart.Parent = workspace
+        RestoreObjects()
         
-        -- Tambahkan BodyPosition untuk memastikan ground tetap stabil
-        local bodyPos = Instance.new("BodyPosition")
-        bodyPos.MaxForce = Vector3.new(0, 0, 0)  -- Tidak aktif secara default
-        bodyPos.Parent = GroundPart
-        
-        print("[GROUND] Enhanced platform created with improved stability")
-    end
-    return GroundPart
-end
-
--- ========================================
--- NOCLIP FEATURE
--- ========================================
-local NoClipConnection
-
-local function toggleNoClip(enabled)
-    if NoClipConnection then
-        NoClipConnection:Disconnect()
-        NoClipConnection = nil
-    end
-    
-    if enabled then
-        NoClipConnection = RunService.Stepped:Connect(function()
-            if LocalPlayer.Character then
-                for _, part in pairs(LocalPlayer.Character:GetDescendants()) do
-                    if part:IsA("BasePart") then
-                        part.CanCollide = false
-                    end
-                end
-            end
-        end)
-        print("[NOCLIP] Enabled - you can pass through walls")
-    else
-        print("[NOCLIP] Disabled")
-    end
-end
-
--- ========================================
--- INFINITE JUMP
--- ========================================
-local InfiniteJumpConnection
-
-local function toggleInfiniteJump(enabled)
-    if InfiniteJumpConnection then
-        InfiniteJumpConnection:Disconnect()
-        InfiniteJumpConnection = nil
-    end
-    
-    if enabled then
-        InfiniteJumpConnection = game:GetService("UserInputService").JumpRequest:Connect(function()
-            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid") then
-                LocalPlayer.Character:FindFirstChildOfClass("Humanoid"):ChangeState("Jumping")
-            end
-        end)
-        print("[INFINITE JUMP] Enabled")
-    else
-        print("[INFINITE JUMP] Disabled")
-    end
-end
-
--- ========================================
--- IMPROVED TWEEN SYSTEM FOR AUTO FARM
--- ========================================
-local ActiveTween
-local TweenCancelled = false
-
-local function tweenVehicleToPosition(vehicle, targetCFrame, speed)
-    if ActiveTween then
-        ActiveTween:Cancel()
-    end
-    
-    TweenCancelled = false
-    ensureGroundPart()  -- Pastikan ground part ada sebelum mulai tween
-    
-    local distance = (vehicle.PrimaryPart.Position - targetCFrame.Position).Magnitude
-    local duration = distance / speed
-    
-    local tweenValue = Instance.new("CFrameValue")
-    tweenValue.Value = vehicle:GetPrimaryPartCFrame()
-    
-    tweenValue.Changed:Connect(function()
-        if TweenCancelled then return end
-        if not GroundPart or not GroundPart.Parent then
-            ensureGroundPart()
-        end
-        
-        local currentPos = tweenValue.Value.Position
-        
-        -- Update ground position dengan smooth interpolation
-        GroundPart.Position = currentPos - Vector3.new(0, 14, 0)
-        
-        -- Posisikan kendaraan di atas ground dan arahkan ke target
-        vehicle:PivotTo(CFrame.new(
-            GroundPart.Position + Vector3.new(0, 7, 0),
-            targetCFrame.Position
-        ))
-        
-        -- Set velocity untuk movement yang natural
-        local direction = vehicle.PrimaryPart.CFrame.LookVector
-        vehicle.PrimaryPart.AssemblyLinearVelocity = direction * speed
-    end)
-    
-    local tweenInfo = TweenInfo.new(
-        duration,
-        Enum.EasingStyle.Linear,
-        Enum.EasingDirection.InOut
-    )
-    
-    ActiveTween = TweenService:Create(tweenValue, tweenInfo, {
-        Value = targetCFrame
-    })
-    
-    ActiveTween:Play()
-    ActiveTween.Completed:Wait()
-end
-
--- ========================================
--- DRAMATICALLY IMPROVED DELIVERY SYSTEM
--- FIX: Sistem baru dengan logika yang lebih smooth dan reliable
--- ========================================
-local DeliveryConnection
-
-local function tweenToDeliveryLocation(vehicle, targetModel)
-    -- Cancel tween sebelumnya jika ada
-    if ActiveTween then
-        ActiveTween:Cancel()
-    end
-    
-    -- Disconnect connection lama jika ada
-    if DeliveryConnection then
-        DeliveryConnection:Disconnect()
-        DeliveryConnection = nil
-    end
-    
-    TweenCancelled = false
-    ensureGroundPart()  -- Pastikan ground part ada dan valid
-    
-    local targetCFrame = targetModel.WorldPivot + Vector3.new(0, 8, 0)  -- Saya naikkan dari 5 ke 8 untuk clearance lebih baik
-    local startDistance = (vehicle.PrimaryPart.Position - targetCFrame.Position).Magnitude
-    
-    print("[DELIVERY] Starting delivery, distance: " .. math.floor(startDistance) .. " studs")
-    
-    -- Fase 1: Tween untuk jarak jauh (lebih dari 100 studs)
-    if startDistance > 100 then
-        local speed = Config.Speed
-        local duration = startDistance / speed
-        
-        local tweenValue = Instance.new("CFrameValue")
-        tweenValue.Value = vehicle:GetPrimaryPartCFrame()
-        
-        local updateConnection
-        updateConnection = tweenValue.Changed:Connect(function()
-            if TweenCancelled or not Config.AutoDeliver then 
-                if updateConnection then updateConnection:Disconnect() end
-                return 
-            end
-            
-            -- Pastikan ground part masih ada
-            if not GroundPart or not GroundPart.Parent then
-                ensureGroundPart()
-            end
-            
-            local currentPos = tweenValue.Value.Position
-            local currentDistance = (currentPos - targetCFrame.Position).Magnitude
-            
-            -- Jika sudah dekat, cancel tween dan switch ke fase 2
-            if currentDistance <= 100 then
-                TweenCancelled = true
-                if ActiveTween then ActiveTween:Cancel() end
-    if DeliveryConnection then DeliveryConnection:Disconnect() end
-    toggleNoClip(false)
-    toggleInfiniteJump(false)
-    restoreWorkspaceObjects()
-    
-    print("[EMERGENCY] All features stopped!")
-end)
-
--- ========================================
--- INITIALIZATION
--- ========================================
-print("===========================================")
-print("MIDNIGHT CHASERS BRUTAL FARM - FIXED VERSION")
-print("===========================================")
-
-initializeStreaming()
-setupAntiAFK()
-
-print("[READY] Script loaded successfully!")
-print("[INFO] GUI is now draggable - click and drag to move it!")
-print("[FIX] Delivery system completely rewritten for stability")
-print("===========================================")
-d
-                if updateConnection then updateConnection:Disconnect() end
-                return
-            end
-            
-            -- Update ground position dengan offset yang konsisten
-            GroundPart.CFrame = CFrame.new(currentPos - Vector3.new(0, 14, 0))
-            
-            -- Posisikan kendaraan dengan rotasi yang smooth
-            local lookDirection = (targetCFrame.Position - currentPos).Unit
-            local newCFrame = CFrame.new(
-                GroundPart.Position + Vector3.new(0, 7, 0),
-                GroundPart.Position + Vector3.new(0, 7, 0) + lookDirection
-            )
-            
-            vehicle:PivotTo(newCFrame)
-            vehicle.PrimaryPart.AssemblyLinearVelocity = vehicle.PrimaryPart.CFrame.LookVector * speed
-        end)
-        
-        local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut)
-        ActiveTween = TweenService:Create(tweenValue, tweenInfo, { Value = targetCFrame })
-        ActiveTween:Play()
-        
-        -- Wait sampai tween selesai atau di-cancel
-        repeat task.wait(0.03)
-        until TweenCancelled or not Config.AutoDeliver or 
-              ActiveTween.PlaybackState == Enum.PlaybackState.Completed or
-              not targetModel:FindFirstChild("Highlight")
-        
-        if updateConnection then updateConnection:Disconnect() end
-    end
-    
-    -- Fase 2: Approach perlahan untuk jarak menengah (15-100 studs)
-    -- FIX: Saya tambahkan fase ini untuk transisi yang lebih smooth
-    print("[DELIVERY] Entering approach phase")
-    
-    DeliveryConnection = RunService.Heartbeat:Connect(function()
-        if not Config.AutoDeliver or not targetModel:FindFirstChild("Highlight") then
-            if DeliveryConnection then 
-                DeliveryConnection:Disconnect() 
-                DeliveryConnection = nil
-            end
-            return
-        end
-        
-        -- Pastikan ground part masih ada
-        if not GroundPart or not GroundPart.Parent then
-            ensureGroundPart()
-        end
-        
-        local currentDistance = LocalPlayer:DistanceFromCharacter(targetCFrame.Position)
-        
-        if currentDistance > 15 then
-            -- Masih di fase approach (15-100 studs): gerak perlahan tapi controlled
-            local currentPos = vehicle.PrimaryPart.Position
-            
-            -- Update ground dengan smooth positioning
-            local targetGroundPos = Vector3.new(currentPos.X, currentPos.Y - 10, currentPos.Z)
-            GroundPart.CFrame = CFrame.new(targetGroundPos)
-            
-            -- Hitung direction ke target (hanya horizontal, ignore Y axis untuk lebih stabil)
-            local horizontalTarget = Vector3.new(targetCFrame.X, currentPos.Y, targetCFrame.Z)
-            local direction = (horizontalTarget - currentPos).Unit
-            
-            -- Posisikan kendaraan menghadap target dengan smooth rotation
-            local newCFrame = CFrame.new(
-                GroundPart.Position + Vector3.new(0, 7, 0),
-                GroundPart.Position + Vector3.new(0, 7, 0) + direction
-            )
-            
-            vehicle:PivotTo(newCFrame)
-            
-            -- Set velocity dengan kecepatan approach yang lebih tinggi dan stabil
-            vehicle.PrimaryPart.AssemblyLinearVelocity = direction * Config.TweenSpeed.Approach
-            
-        elseif currentDistance <= 15 and currentDistance > 3 then
-            -- Fase final approach (3-15 studs): super slow dan precise
-            local currentPos = vehicle.PrimaryPart.Position
-            
-            -- Lock ground position untuk stabilitas maksimal
-            local targetGroundPos = Vector3.new(currentPos.X, currentPos.Y - 8, currentPos.Z)
-            GroundPart.CFrame = CFrame.new(targetGroundPos)
-            
-            -- Hitung direction (horizontal only)
-            local horizontalTarget = Vector3.new(targetCFrame.X, currentPos.Y, targetCFrame.Z)
-            local direction = (horizontalTarget - currentPos).Unit
-            
-            -- Posisikan dengan precision tinggi
-            vehicle:PivotTo(CFrame.new(
-                GroundPart.Position + Vector3.new(0, 7, 0),
-                GroundPart.Position + Vector3.new(0, 7, 0) + direction
-            ))
-            
-            -- Velocity sangat lambat untuk precision
-            vehicle.PrimaryPart.AssemblyLinearVelocity = direction * 15
-            
-        else
-            -- Sudah sampai di target (kurang dari 3 studs): STOP
-            print("[DELIVERY] Arrived at destination!")
-            
-            -- Lock posisi final
-            local finalGroundPos = Vector3.new(targetCFrame.X, targetCFrame.Y - 8, targetCFrame.Z)
-            GroundPart.CFrame = CFrame.new(finalGroundPos)
-            
-            -- Stop kendaraan sepenuhnya
-            vehicle.PrimaryPart.AssemblyLinearVelocity = Vector3.zero
-            vehicle.PrimaryPart.AssemblyAngularVelocity = Vector3.zero
-            
-            -- Posisikan tepat di target
-            vehicle:PivotTo(CFrame.new(
-                Vector3.new(targetCFrame.X, GroundPart.CFrame.Y + 7, targetCFrame.Z)
-            ))
-            
-            -- Disconnect karena sudah sampai
-            if DeliveryConnection then
-                DeliveryConnection:Disconnect()
-                DeliveryConnection = nil
-            end
-        end
-    end)
-    
-    -- Wait sampai highlight hilang (delivery complete) atau user stop
-    repeat task.wait(0.1)
-    until not targetModel:FindFirstChild("Highlight") or not Config.AutoDeliver
-    
-    -- Cleanup connection
-    if DeliveryConnection then
-        DeliveryConnection:Disconnect()
-        DeliveryConnection = nil
-    end
-    
-    print("[DELIVERY] Delivery phase completed")
-end
-
--- ========================================
--- AUTO FARM LOGIC
--- ========================================
-local FarmWaypoints = {
-    CFrame.new(105.419128, -26.0098934, 7965.37988, -3.36170197e-05, 0.951051414, -0.309032798, -1, -3.36170197e-05, 5.31971455e-06, -5.31971455e-06, 0.309032798, 0.951051414),
-    CFrame.new(2751.86499, -26.0098934, 3694.63354, 3.34978104e-05, 0.951051414, -0.309032798, -1, 3.34978104e-05, -5.31971455e-06, 5.31971455e-06, 0.309032798, 0.951051414),
-    CFrame.new(-8821.48438, -26.0098934, 2042.49939, -3.36170197e-05, 0.951051414, -0.309032798, -1, -3.36170197e-05, 5.31971455e-06, -5.31971455e-06, 0.309032798, 0.951051414),
-    CFrame.new(-6408.62109, -26.0098934, -727.765198, 3.34978104e-05, 0.951051414, -0.309032798, -1, 3.34978104e-05, -5.31971455e-06, 5.31971455e-06, 0.309032798, 0.951051414),
-    CFrame.new(-6099.79639, -26.00989345, -1027.94556, -3.36170197e-05, 0.951051414, -0.309032798, -1, -3.36170197e-05, 5.31971455e-06, -5.31971455e-06, 0.309032798, 0.951051414),
-    CFrame.new(-6066.70068, -26.0098934, 493.255524, 3.34978104e-05, 0.951051414, -0.309032798, -1, 3.34978104e-05, -5.31971455e-06, 5.31971455e-06, 0.309032798, 0.951051414),
-    CFrame.new(132.786133, -26.0098934, 15.2286377, 3.34978104e-05, 0.951051414, -0.309032798, -1, 3.34978104e-05, -5.31971455e-06, 5.31971455e-06, 0.309032798, 0.951051414),
-    CFrame.new(-7692.85449, -26.0098934, -4668.61963, -3.36170197e-05, 0.951051414, -0.309032798, -1, -3.36170197e-05, 5.31971455e-06, -5.31971455e-06, 0.309032798, 0.951051414),
-    CFrame.new(4887.24609, -26.0098934, 1222.96826, -3.36170197e-05, 0.951051414, -0.309032798, -1, -3.36170197e-05, 5.31971455e-06, -5.31971455e-06, 0.309032798, 0.951051414)
-}
-
-local function startAutoFarm()
-    hideWorkspaceObjects()
-    task.wait(0.5)
-    
-    while Config.AutoFarm do
-        local character = LocalPlayer.Character
-        if not character then break end
-        
-        local humanoid = character:FindFirstChildOfClass("Humanoid")
-        if not humanoid or not humanoid.SeatPart then 
-            warn("[AUTO FARM] Not in a vehicle!")
-            break 
-        end
-        
-        local vehicle = humanoid.SeatPart.Parent
-        ensureGroundPart()
-        
-        vehicle.PrimaryPart = vehicle.Body:FindFirstChild("#Weight") or vehicle.PrimaryPart
-        
-        print("[AUTO FARM] Starting route with " .. #FarmWaypoints .. " waypoints")
-        
-        for i, waypoint in ipairs(FarmWaypoints) do
-            if not Config.AutoFarm then break end
-            
-            print("[AUTO FARM] Moving to waypoint " .. i .. "/" .. #FarmWaypoints)
-            local targetCFrame = waypoint + Vector3.new(0, 5, 0)
-            tweenVehicleToPosition(vehicle, targetCFrame, Config.Speed)
-            task.wait(0.1)
-        end
-        
-        print("[AUTO FARM] Completed route, restarting...")
-    end
-end
-
--- ========================================
--- IMPROVED AUTO DELIVER LOGIC
--- ========================================
-local function findNearestDeliveryLocation()
-    local nearestLocation = nil
-    local shortestDistance = math.huge
-    
-    for _, obj in pairs(workspace:GetChildren()) do
-        if obj.Name == "" and obj:FindFirstChild("Highlight") then
-            local distance = (LocalPlayer.Character.PrimaryPart.Position - obj.WorldPivot.Position).Magnitude
-            if distance < shortestDistance then
-                shortestDistance = distance
-                nearestLocation = obj
-            end
-        end
-    end
-    
-    return nearestLocation
-end
-
-local function startAutoDeliver()
-    hideWorkspaceObjects()
-    task.wait(0.5)
-    
-    while Config.AutoDeliver do
-        task.wait(0.1)
-        
-        local character = LocalPlayer.Character
-        if not character then break end
-        
-        local humanoid = character:FindFirstChildOfClass("Humanoid")
-        if not humanoid or not humanoid.SeatPart then
-            warn("[AUTO DELIVER] Not in a vehicle!")
-            task.wait(2)
-            continue
-        end
-        
-        local vehicle = humanoid.SeatPart.Parent
-        ensureGroundPart()
-        vehicle.PrimaryPart = vehicle.Body:FindFirstChild("#Weight") or vehicle.PrimaryPart
-        
-        local deliveryLocation = findNearestDeliveryLocation()
-        
-        if deliveryLocation then
-            print("[AUTO DELIVER] Found delivery location, moving...")
-            tweenToDeliveryLocation(vehicle, deliveryLocation)
-            task.wait(0.5)  -- Delay setelah delivery selesai
-            
-        elseif workspace:FindFirstChild("GiftPickup") then
-            print("[AUTO DELIVER] Moving to gift pickup point")
-            
-            -- Improved pickup logic dengan positioning yang lebih baik
-            local pickupPos = workspace.GiftPickup.WorldPivot.Position
-            local approachCFrame = CFrame.new(pickupPos + Vector3.new(0, 8, 0))
-            
-            -- Approach ke pickup point
-            local distance = (vehicle.PrimaryPart.Position - approachCFrame.Position).Magnitude
-            if distance > 10 then
-                tweenVehicleToPosition(vehicle, approachCFrame, Config.Speed * 0.7)
-            end
-            
-            -- Stay di pickup point sambil loading gifts
-            repeat
-                task.wait(0.1)
-                
-                if not GroundPart or not GroundPart.Parent then
-                    ensureGroundPart()
-                end
-                
-                -- Lock position di pickup point
-                GroundPart.CFrame = CFrame.new(pickupPos - Vector3.new(0, 8, 0))
-                vehicle:PivotTo(CFrame.new(GroundPart.Position + Vector3.new(0, 7, 0)))
-                vehicle.PrimaryPart.AssemblyLinearVelocity = Vector3.zero
-                vehicle.PrimaryPart.AssemblyAngularVelocity = Vector3.zero
-                
-            until hasReachedMaxGifts(vehicle) or not Config.AutoDeliver or not workspace:FindFirstChild("GiftPickup")
-            
-            print("[AUTO DELIVER] Gifts loaded, ready for delivery")
-            task.wait(0.5)
-            
-        else
-            warn("[AUTO DELIVER] No delivery locations or pickup points found")
-            task.wait(2)
-        end
-    end
-end
-
--- ========================================
--- DRAGGABLE GUI SYSTEM
--- Sistem baru untuk membuat GUI bisa di-drag
--- ========================================
-local function makeDraggable(gui)
-    local dragging = false
-    local dragInput, mousePos, framePos
-    
-    gui.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = true
-            mousePos = input.Position
-            framePos = gui.Position
-            
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    dragging = false
-                end
-            end)
-        end
-    end)
-    
-    gui.InputChanged:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement then
-            dragInput = input
-        end
-    end)
-    
-    game:GetService("UserInputService").InputChanged:Connect(function(input)
-        if input == dragInput and dragging then
-            local delta = input.Position - mousePos
-            gui.Position = UDim2.new(
-                framePos.X.Scale,
-                framePos.X.Offset + delta.X,
-                framePos.Y.Scale,
-                framePos.Y.Offset + delta.Y
-            )
-        end
-    end)
-end
-
--- ========================================
--- GUI CREATION WITH DRAGGABLE FEATURE
--- ========================================
-local library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Schlabbadabadoo/RandomScripts/refs/heads/main/ui.lua", true))()
-local window = library:CreateWindow({
-    text = "🔥 MIDNIGHT CHASERS BRUTAL FARM 🔥"
-})
-
--- Buat GUI bisa di-drag
--- Library mungkin sudah punya sistem draggable, tapi kita tambahkan sendiri untuk memastikan
-task.spawn(function()
-    task.wait(0.5)  -- Wait untuk GUI fully loaded
-    
-    -- Cari main frame dari GUI
-    local playerGui = LocalPlayer:WaitForChild("PlayerGui")
-    for _, gui in pairs(playerGui:GetDescendants()) do
-        if gui:IsA("Frame") and gui.Name:find("Main") or gui.Name:find("Window") then
-            pcall(function()
-                makeDraggable(gui)
-                print("[GUI] Draggable system enabled - you can now drag the GUI!")
-            end)
-            break
-        end
+        warn("Script cleanup completed!")
     end
 end)
-
--- Speed Control
-window:AddBox("Vehicle Speed (Default: 300)", function(object, focus)
-    if focus then
-        local speed = tonumber(object.Text)
-        if speed and speed > 0 then
-            Config.Speed = speed
-            print("[CONFIG] Speed set to: " .. speed)
-        end
-    end
-end)
-
--- Auto Farm Toggle
-window:AddToggle("Auto Farm", function(state)
-    Config.AutoFarm = state
-    
-    if state then
-        print("[AUTO FARM] Starting...")
-        task.spawn(startAutoFarm)
-    else
-        print("[AUTO FARM] Stopped")
-        if ActiveTween then ActiveTween:Cancel() end
-        if DeliveryConnection then DeliveryConnection:Disconnect() end
-        restoreWorkspaceObjects()
-    end
-end)
-
--- Auto Deliver Toggle
-window:AddToggle("Auto Deliver [Event]", function(state)
-    Config.AutoDeliver = state
-    
-    if state then
-        print("[AUTO DELIVER] Starting...")
-        task.spawn(startAutoDeliver)
-    else
-        print("[AUTO DELIVER] Stopped")
-        if ActiveTween then ActiveTween:Cancel() end
-        if DeliveryConnection then DeliveryConnection:Disconnect() end
-        restoreWorkspaceObjects()
-    end
-end)
-
--- NoClip Toggle
-window:AddToggle("NoClip (Pass Through Walls)", function(state)
-    Config.NoClip = state
-    toggleNoClip(state)
-end)
-
--- Infinite Jump Toggle
-window:AddToggle("Infinite Jump", function(state)
-    Config.InfiniteJump = state
-    toggleInfiniteJump(state)
-end)
-
--- Anti-AFK Toggle
-window:AddToggle("Anti-AFK (Default: ON)", function(state)
-    Config.AntiAFK = state
-    print("[ANTI-AFK] " .. (state and "Enabled" or "Disabled"))
-end)
-
--- Emergency Stop Button
-window:AddButton("⛔ EMERGENCY STOP ALL", function()
-    print("[EMERGENCY] Stopping all features...")
-    Config.AutoFarm = false
-    Config.AutoDeliver = false
-    Config.NoClip = false
-    Config.InfiniteJump = false
-    
-    if ActiveTween then ActiveTween:Cancel() en
