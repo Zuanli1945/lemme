@@ -1,15 +1,15 @@
 -- // Midnight Chasers: Zuan WM Final Edition 🧙‍♂️ //
--- Mobile-friendly GUI + AutoFarm + AutoDeliver
--- Optimized for Delta Mobile (Touch + Blur + Inertia)
+-- Mobile-friendly GUI + AutoFarm + AutoDeliver + Anti-Nyangkut Fix
+-- Optimized for Delta Mobile
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Lighting = game:GetService("Lighting")
+local Workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
 
--- GLOBAL FLAGS --
 getgenv().AutoFarm = false
 getgenv().AutoDeliver = false
 getgenv().Speed = 250
@@ -54,6 +54,20 @@ local function findCar()
     return nil
 end
 
+-- Lift car slightly above ground to prevent it from getting stuck
+local function liftCarAboveGround(car)
+    if not car or not car.PrimaryPart then return end
+    local origin = car.PrimaryPart.Position
+    local ray = Ray.new(origin, Vector3.new(0, -50, 0))
+    local hit, pos = Workspace:FindPartOnRay(ray, car)
+    if hit then
+        local liftHeight = 10
+        car:PivotTo(CFrame.new(Vector3.new(pos.X, pos.Y + liftHeight, pos.Z), car.PrimaryPart.CFrame.LookVector))
+    else
+        car:PivotTo(car.PrimaryPart.CFrame + Vector3.new(0, 15, 0))
+    end
+end
+
 -- SMOOTH HEARTBEAT TWEEN --
 local function smoothTween(car, targetPos, speed)
     if not car or not car.PrimaryPart then return end
@@ -72,6 +86,7 @@ local function smoothTween(car, targetPos, speed)
         car:PivotTo(CFrame.new(getgenv().GroundPart.Position + Vector3.new(0, 7, 0), targetPos.Position))
         car.PrimaryPart.AssemblyLinearVelocity = car.PrimaryPart.CFrame.LookVector * speed
     end
+    liftCarAboveGround(car)
 end
 
 -- AUTO FARM LOOP --
@@ -124,6 +139,7 @@ local function autoDeliverLoop()
 
             if nearest then
                 smoothTween(car, nearest.WorldPivot + Vector3.new(0, 5, 0), getgenv().Speed)
+                liftCarAboveGround(car)
             else
                 task.wait(1)
             end
@@ -161,7 +177,6 @@ title.Text = "⚡ Midnight Zuan Control"
 title.Font = Enum.Font.GothamBold
 title.TextScaled = true
 title.TextColor3 = Color3.fromRGB(200, 170, 255)
-
 title.TextStrokeTransparency = 0.8
 
 local scroll = Instance.new("ScrollingFrame", frame)
@@ -179,41 +194,6 @@ status.Text = "🔴 Idle"
 status.TextColor3 = Color3.fromRGB(255, 100, 100)
 status.Font = Enum.Font.Gotham
 status.TextSize = 14
-
--- Dragging with inertia --
-local dragging, dragStart, startPos, velocity = false, nil, nil, Vector2.new(0, 0)
-local function updateDrag(input)
-    local delta = input.Position - dragStart
-    local newPos = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-    frame.Position = newPos
-end
-
-frame.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-        dragging = true
-        dragStart = input.Position
-        startPos = frame.Position
-    end
-end)
-
-UserInputService.InputChanged:Connect(function(input)
-    if dragging and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
-        updateDrag(input)
-        velocity = input.Delta
-    end
-end)
-
-UserInputService.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-        dragging = false
-        local decay = 0.93
-        while math.abs(velocity.X) > 1 or math.abs(velocity.Y) > 1 do
-            frame.Position = UDim2.new(frame.Position.X.Scale, frame.Position.X.Offset + velocity.X, frame.Position.Y.Scale, frame.Position.Y.Offset + velocity.Y)
-            velocity *= decay
-            RunService.Heartbeat:Wait()
-        end
-    end
-end)
 
 -- BUTTON CREATOR --
 local function createButton(text, callback)
@@ -242,23 +222,14 @@ local function createButton(text, callback)
     end)
 end
 
--- BUTTON LOGIC --
 createButton("Auto Farm", function(state)
     getgenv().AutoFarm = state
-    if state then
-        autoFarmLoop()
-    else
-        getgenv().IsRunning = false
-    end
+    if state then autoFarmLoop() else getgenv().IsRunning = false end
 end)
 
 createButton("Auto Deliver", function(state)
     getgenv().AutoDeliver = state
-    if state then
-        autoDeliverLoop()
-    else
-        getgenv().IsRunning = false
-    end
+    if state then autoDeliverLoop() else getgenv().IsRunning = false end
 end)
 
 local speedBox = Instance.new("TextBox", scroll)
@@ -277,7 +248,6 @@ speedBox.FocusLost:Connect(function()
     if val then getgenv().Speed = val end
 end)
 
--- BLUR TOGGLE --
 UserInputService.InputBegan:Connect(function(input)
     if input.KeyCode == Enum.KeyCode.RightShift then
         gui.Enabled = not gui.Enabled
@@ -290,4 +260,4 @@ UserInputService.InputBegan:Connect(function(input)
     end
 end)
 
-warn("🌌 Midnight Zuan Final Edition loaded successfully!")
+warn("🌌 Midnight Zuan WM with Anti-Nyangkut loaded!")
