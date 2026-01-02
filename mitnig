@@ -1,185 +1,293 @@
--- // Midnight Chasers Pro Farm GUI // Grimoire Edition 🧙‍♂️ //
--- Full rewrite with smooth GUI & optimizations
--- Written for Roblox Lua (Executor compatible)
+-- // Midnight Chasers: Zuan WM Final Edition 🧙‍♂️ //
+-- Mobile-friendly GUI + AutoFarm + AutoDeliver
+-- Optimized for Delta Mobile (Touch + Blur + Inertia)
 
---// SERVICES //
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Lighting = game:GetService("Lighting")
 local LocalPlayer = Players.LocalPlayer
 
---// GLOBAL SETTINGS //
+-- GLOBAL FLAGS --
 getgenv().AutoFarm = false
 getgenv().AutoDeliver = false
 getgenv().Speed = 250
-getgenv().CancelTween = nil
 getgenv().GroundPart = nil
+getgenv().IsRunning = false
 
---// ANTI-AFK //
+-- ANTI-AFK --
 LocalPlayer.Idled:Connect(function()
     local vu = game:GetService("VirtualUser")
     vu:CaptureController()
     vu:ClickButton2(Vector2.new())
 end)
-warn("Anti-AFK Enabled")
 
---// HELPER FUNCTIONS //
+-- BLUR EFFECT --
+local blur = Instance.new("BlurEffect", Lighting)
+blur.Size = 0
+blur.Enabled = false
+
+-- HELPER FUNCTIONS --
 local function ensureGroundPart()
     if not getgenv().GroundPart then
         local ground = Instance.new("Part", workspace)
-        ground.Name = "_AutoFarmGround"
         ground.Anchored = true
         ground.Size = Vector3.new(10000, 10, 10000)
         ground.Position = Vector3.new(0, -50, 0)
-        ground.Color = Color3.fromRGB(20, 20, 20)
+        ground.Color = Color3.fromRGB(25, 25, 25)
         getgenv().GroundPart = ground
     end
 end
 
-local function hideWorkspaceObjects()
-    local folder = ReplicatedStorage:FindFirstChild("mrbackupfolder") or Instance.new("Folder", ReplicatedStorage)
-    folder.Name = "mrbackupfolder"
-    for _, obj in ipairs(workspace:GetChildren()) do
-        if obj:IsA("Model") or obj:IsA("Folder") or obj:IsA("MeshPart") then
-            if not string.find(obj.Name, LocalPlayer.Name) and not string.find(obj.Name, "Gift") and obj.Name ~= "" then
-                obj.Parent = folder
-            end
+local function findCar()
+    local chr = LocalPlayer.Character
+    if not chr or not chr:FindFirstChildOfClass("Humanoid") then return nil end
+    local hum = chr:FindFirstChildOfClass("Humanoid")
+    if hum and hum.SeatPart and hum.SeatPart.Parent then
+        local car = hum.SeatPart.Parent
+        if car:FindFirstChild("Body") and car.Body:FindFirstChild("#Weight") then
+            car.PrimaryPart = car.Body["#Weight"]
+            return car
         end
     end
+    return nil
 end
 
-local function restoreWorkspaceObjects()
-    local folder = ReplicatedStorage:FindFirstChild("mrbackupfolder")
-    if folder then
-        for _, v in ipairs(folder:GetChildren()) do
-            v.Parent = workspace
-            task.wait()
-        end
-    end
-end
-
---// TWEENING LOGIC //
-local function tweenToPosition(car, targetPos, speed)
+-- SMOOTH HEARTBEAT TWEEN --
+local function smoothTween(car, targetPos, speed)
+    if not car or not car.PrimaryPart then return end
     ensureGroundPart()
-    local TweenInfoToUse = TweenInfo.new((car.PrimaryPart.Position - targetPos.Position).Magnitude / speed, Enum.EasingStyle.Linear)
-    local CValue = Instance.new("CFrameValue")
-    CValue.Value = car:GetPrimaryPartCFrame()
+    local startPos = car.PrimaryPart.Position
+    local dist = (startPos - targetPos.Position).Magnitude
+    local duration = dist / speed
+    local startTime = tick()
 
-    CValue.Changed:Connect(function()
-        local pos = CValue.Value.Position
-        getgenv().GroundPart.Position = pos - Vector3.new(0, 14, 0)
+    while tick() - startTime < duration and getgenv().IsRunning do
+        local dt = RunService.Heartbeat:Wait()
+        local alpha = math.clamp((tick() - startTime) / duration, 0, 1)
+        local eased = 0.5 - 0.5 * math.cos(math.pi * alpha)
+        local newPos = startPos:Lerp(targetPos.Position, eased)
+        getgenv().GroundPart.Position = newPos - Vector3.new(0, 14, 0)
         car:PivotTo(CFrame.new(getgenv().GroundPart.Position + Vector3.new(0, 7, 0), targetPos.Position))
         car.PrimaryPart.AssemblyLinearVelocity = car.PrimaryPart.CFrame.LookVector * speed
-    end)
-
-    local Tween = TweenService:Create(CValue, TweenInfoToUse, { Value = targetPos })
-    getgenv().CurrentTween = Tween
-    Tween:Play()
-    repeat task.wait() until Tween.PlaybackState ~= Enum.PlaybackState.Playing
+    end
 end
 
---// GUI CREATION //
-local ScreenGui = Instance.new("ScreenGui", LocalPlayer:WaitForChild("PlayerGui"))
-ScreenGui.Name = "MidnightFarmUI"
-ScreenGui.ResetOnSpawn = false
+-- AUTO FARM LOOP --
+local function autoFarmLoop()
+    task.spawn(function()
+        getgenv().IsRunning = true
+        ensureGroundPart()
+        local car = findCar()
+        if not car then warn("❌ No car found!") return end
 
-local MainFrame = Instance.new("Frame", ScreenGui)
-MainFrame.Size = UDim2.new(0, 300, 0, 240)
-MainFrame.Position = UDim2.new(0.5, -150, 0.5, -120)
-MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
-MainFrame.BorderSizePixel = 0
-MainFrame.Active = true
-MainFrame.Draggable = true
+        local frames = {
+            CFrame.new(100, -25, 7960),
+            CFrame.new(2750, -25, 3690),
+            CFrame.new(-8800, -25, 2050),
+            CFrame.new(-6400, -25, -720),
+            CFrame.new(4900, -25, 1200)
+        }
 
-local UICorner = Instance.new("UICorner", MainFrame)
-UICorner.CornerRadius = UDim.new(0, 12)
-
-local UIStroke = Instance.new("UIStroke", MainFrame)
-UIStroke.Thickness = 2
-UIStroke.Color = Color3.fromRGB(100, 0, 200)
-
-local Title = Instance.new("TextLabel", MainFrame)
-Title.Size = UDim2.new(1, 0, 0, 40)
-Title.BackgroundTransparency = 1
-Title.Text = "🌙 Midnight Chasers"
-Title.Font = Enum.Font.GothamBold
-Title.TextColor3 = Color3.fromRGB(180, 140, 255)
-Title.TextScaled = true
-
-local ScrollingFrame = Instance.new("ScrollingFrame", MainFrame)
-ScrollingFrame.Size = UDim2.new(1, 0, 1, -40)
-ScrollingFrame.Position = UDim2.new(0, 0, 0, 40)
-ScrollingFrame.CanvasSize = UDim2.new(0, 0, 2, 0)
-ScrollingFrame.ScrollBarThickness = 6
-ScrollingFrame.BackgroundTransparency = 1
-
-local function createToggle(text, callback)
-    local Btn = Instance.new("TextButton", ScrollingFrame)
-    Btn.Size = UDim2.new(1, -20, 0, 36)
-    Btn.Position = UDim2.new(0, 10, 0, (#ScrollingFrame:GetChildren() - 1) * 40)
-    Btn.Text = text
-    Btn.Font = Enum.Font.Gotham
-    Btn.TextSize = 16
-    Btn.BackgroundColor3 = Color3.fromRGB(50, 50, 80)
-    Btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    Btn.AutoButtonColor = true
-
-    local UIC = Instance.new("UICorner", Btn)
-    UIC.CornerRadius = UDim.new(0, 10)
-
-    local On = false
-    Btn.MouseButton1Click:Connect(function()
-        On = not On
-        Btn.BackgroundColor3 = On and Color3.fromRGB(100, 0, 200) or Color3.fromRGB(50, 50, 80)
-        callback(On)
+        while getgenv().AutoFarm and getgenv().IsRunning do
+            for _, pos in ipairs(frames) do
+                if not getgenv().AutoFarm then break end
+                smoothTween(car, pos + Vector3.new(0, 5, 0), getgenv().Speed)
+                task.wait(0.2)
+            end
+        end
+        getgenv().IsRunning = false
     end)
 end
 
--- GUI TOGGLES
-createToggle("Auto Farm", function(state)
+-- AUTO DELIVER LOOP --
+local function autoDeliverLoop()
+    task.spawn(function()
+        getgenv().IsRunning = true
+        ensureGroundPart()
+        while getgenv().AutoDeliver and getgenv().IsRunning do
+            local plr = LocalPlayer
+            local car = findCar()
+            if not car then task.wait(1) continue end
+
+            local nearest, dist = nil, math.huge
+            for _, v in pairs(workspace:GetChildren()) do
+                if v:FindFirstChild("Highlight") then
+                    local d = (plr.Character.HumanoidRootPart.Position - v.WorldPivot.Position).Magnitude
+                    if d < dist then
+                        dist = d
+                        nearest = v
+                    end
+                end
+            end
+
+            if nearest then
+                smoothTween(car, nearest.WorldPivot + Vector3.new(0, 5, 0), getgenv().Speed)
+            else
+                task.wait(1)
+            end
+        end
+        getgenv().IsRunning = false
+    end)
+end
+
+-- ZUAN STYLE GUI --
+local parentGui = LocalPlayer:FindFirstChildOfClass("PlayerGui") or game:GetService("CoreGui")
+local gui = Instance.new("ScreenGui", parentGui)
+gui.Name = "ZuanMidnightUI"
+gui.ResetOnSpawn = false
+
+local frame = Instance.new("Frame", gui)
+frame.Size = UDim2.new(0, 320, 0, 260)
+frame.Position = UDim2.new(0.5, -160, 0.5, -130)
+frame.BackgroundColor3 = Color3.fromRGB(30, 30, 50)
+frame.BorderSizePixel = 0
+
+local grad = Instance.new("UIGradient", frame)
+grad.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(100, 0, 255)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 255, 255))
+})
+grad.Rotation = 45
+
+local corner = Instance.new("UICorner", frame)
+corner.CornerRadius = UDim.new(0, 14)
+
+local title = Instance.new("TextLabel", frame)
+title.Size = UDim2.new(1, 0, 0, 40)
+title.BackgroundTransparency = 1
+title.Text = "⚡ Midnight Zuan Control"
+title.Font = Enum.Font.GothamBold
+title.TextScaled = true
+title.TextColor3 = Color3.fromRGB(200, 170, 255)
+
+title.TextStrokeTransparency = 0.8
+
+local scroll = Instance.new("ScrollingFrame", frame)
+scroll.Size = UDim2.new(1, 0, 1, -40)
+scroll.Position = UDim2.new(0, 0, 0, 40)
+scroll.CanvasSize = UDim2.new(0, 0, 2, 0)
+scroll.ScrollBarThickness = 4
+scroll.BackgroundTransparency = 1
+
+local status = Instance.new("TextLabel", frame)
+status.Size = UDim2.new(1, 0, 0, 20)
+status.Position = UDim2.new(0, 0, 1, -25)
+status.BackgroundTransparency = 1
+status.Text = "🔴 Idle"
+status.TextColor3 = Color3.fromRGB(255, 100, 100)
+status.Font = Enum.Font.Gotham
+status.TextSize = 14
+
+-- Dragging with inertia --
+local dragging, dragStart, startPos, velocity = false, nil, nil, Vector2.new(0, 0)
+local function updateDrag(input)
+    local delta = input.Position - dragStart
+    local newPos = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    frame.Position = newPos
+end
+
+frame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        dragStart = input.Position
+        startPos = frame.Position
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
+        updateDrag(input)
+        velocity = input.Delta
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = false
+        local decay = 0.93
+        while math.abs(velocity.X) > 1 or math.abs(velocity.Y) > 1 do
+            frame.Position = UDim2.new(frame.Position.X.Scale, frame.Position.X.Offset + velocity.X, frame.Position.Y.Scale, frame.Position.Y.Offset + velocity.Y)
+            velocity *= decay
+            RunService.Heartbeat:Wait()
+        end
+    end
+end)
+
+-- BUTTON CREATOR --
+local function createButton(text, callback)
+    local b = Instance.new("TextButton", scroll)
+    b.Size = UDim2.new(1, -20, 0, 40)
+    b.Position = UDim2.new(0, 10, 0, (#scroll:GetChildren() - 1) * 45)
+    b.BackgroundColor3 = Color3.fromRGB(50, 50, 80)
+    b.Text = text
+    b.TextColor3 = Color3.new(1,1,1)
+    b.Font = Enum.Font.Gotham
+    b.TextSize = 18
+    local c = Instance.new("UICorner", b)
+    local active = false
+
+    b.MouseButton1Click:Connect(function()
+        active = not active
+        b.BackgroundColor3 = active and Color3.fromRGB(100,0,200) or Color3.fromRGB(50,50,80)
+        callback(active)
+        if active then
+            status.Text = "🟢 Running: "..text
+            status.TextColor3 = Color3.fromRGB(100, 255, 100)
+        else
+            status.Text = "🔴 Stopped"
+            status.TextColor3 = Color3.fromRGB(255, 100, 100)
+        end
+    end)
+end
+
+-- BUTTON LOGIC --
+createButton("Auto Farm", function(state)
     getgenv().AutoFarm = state
     if state then
-        hideWorkspaceObjects()
+        autoFarmLoop()
     else
-        restoreWorkspaceObjects()
+        getgenv().IsRunning = false
     end
 end)
 
-createToggle("Auto Deliver", function(state)
+createButton("Auto Deliver", function(state)
     getgenv().AutoDeliver = state
     if state then
-        hideWorkspaceObjects()
+        autoDeliverLoop()
     else
-        restoreWorkspaceObjects()
+        getgenv().IsRunning = false
     end
 end)
 
--- Add speed slider (simple text input)
-local SpeedBox = Instance.new("TextBox", ScrollingFrame)
-SpeedBox.PlaceholderText = "Vehicle Speed"
-SpeedBox.Size = UDim2.new(1, -20, 0, 36)
-SpeedBox.Position = UDim2.new(0, 10, 0, (#ScrollingFrame:GetChildren() - 1) * 40)
-SpeedBox.BackgroundColor3 = Color3.fromRGB(40, 40, 60)
-SpeedBox.TextColor3 = Color3.new(1, 1, 1)
-SpeedBox.Font = Enum.Font.Gotham
-SpeedBox.TextSize = 16
-SpeedBox.Text = tostring(getgenv().Speed)
-local BoxCorner = Instance.new("UICorner", SpeedBox)
+local speedBox = Instance.new("TextBox", scroll)
+speedBox.Size = UDim2.new(1, -20, 0, 40)
+speedBox.Position = UDim2.new(0, 10, 0, (#scroll:GetChildren() - 1) * 45)
+speedBox.PlaceholderText = "Enter Speed"
+speedBox.Text = tostring(getgenv().Speed)
+speedBox.TextColor3 = Color3.new(1,1,1)
+speedBox.BackgroundColor3 = Color3.fromRGB(35,35,55)
+speedBox.Font = Enum.Font.Gotham
+speedBox.TextSize = 18
+local c2 = Instance.new("UICorner", speedBox)
 
-SpeedBox.FocusLost:Connect(function()
-    local val = tonumber(SpeedBox.Text)
-    if val then
-        getgenv().Speed = val
-    end
+speedBox.FocusLost:Connect(function()
+    local val = tonumber(speedBox.Text)
+    if val then getgenv().Speed = val end
 end)
 
--- UI TOGGLE KEYBIND
-local UIS = game:GetService("UserInputService")
-UIS.InputBegan:Connect(function(input)
+-- BLUR TOGGLE --
+UserInputService.InputBegan:Connect(function(input)
     if input.KeyCode == Enum.KeyCode.RightShift then
-        ScreenGui.Enabled = not ScreenGui.Enabled
+        gui.Enabled = not gui.Enabled
+        blur.Enabled = gui.Enabled
+        local t = 0
+        while t < 1 do
+            t += RunService.Heartbeat:Wait() * 2
+            blur.Size = gui.Enabled and (t * 20) or ((1 - t) * 20)
+        end
     end
 end)
 
-warn("🌙 Midnight Chasers GUI Loaded Successfully!")
+warn("🌌 Midnight Zuan Final Edition loaded successfully!")
