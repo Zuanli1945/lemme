@@ -1,187 +1,182 @@
---// SERVICES
-local Players        = game:GetService("Players")
-local CollectionSvc  = game:GetService("CollectionService")
-local TweenService   = game:GetService("TweenService")
-local RunService     = game:GetService("RunService")
+--////////////////////////////////////////////////////
+-- AUTO FARM CONTROLLER (REFINED)
+--////////////////////////////////////////////////////
 
---// PLAYER
-local plr  = Players.LocalPlayer
-local char = plr.Character or plr.CharacterAdded:Wait()
-local hum  = char:WaitForChild("Humanoid")
-local root = char:WaitForChild("HumanoidRootPart")
+-- SERVICES
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local VirtualUser = game:GetService("VirtualUser")
 
---// SETTINGS
-local TWEEN_TIME     = 0.7
-local CHECK_INTERVAL = 0.9
-local MIN_DISTANCE   = 8
-local HEIGHT_OFFSET  = 4
-local ROOT_TAG       = "FastRootTween"
+local plr = Players.LocalPlayer
 
---// STATE
-local car            = nil
-local currentTween   = nil
-local collected      = {}
-local enabled        = true
+--====================================================
+-- STATE
+--====================================================
+local State = {
+	AutoFarm = false,
+	Speed = 250,
+	Car = nil,
+	Tween = nil,
+	Ground = nil,
+}
 
-----------------------------------------------------------------
--- VEHICLE HANDLING
-----------------------------------------------------------------
-local function getVehicle()
-	if not hum.SeatPart then return nil end
-	local model = hum.SeatPart:FindFirstAncestorOfClass("Model")
-	if not model then return nil end
+--====================================================
+-- ANTI AFK
+--====================================================
+plr.Idled:Connect(function()
+	VirtualUser:CaptureController()
+	VirtualUser:ClickButton2(Vector2.new())
+end)
 
-	if not model.PrimaryPart then
-		local body = model:FindFirstChild("Body")
-		if not body then return nil end
-
-		local weight = body:FindFirstChild("#Weight")
-		if not weight or not weight:IsA("BasePart") then return nil end
-		model.PrimaryPart = weight
-	end
-
-	return model
+--====================================================
+-- GROUND ENSURE
+--====================================================
+local function ensureGround()
+	if State.Ground then return end
+	local p = Instance.new("Part", workspace)
+	p.Anchored = true
+	p.Size = Vector3.new(10000, 10, 10000)
+	p.Transparency = 1
+	p.Name = "FarmGround"
+	State.Ground = p
 end
 
-hum:GetPropertyChangedSignal("SeatPart"):Connect(function()
-	if not hum.SeatPart then
-		car = nil
-		if currentTween then
-			currentTween:Cancel()
-			currentTween = nil
+--====================================================
+-- VEHICLE
+--====================================================
+local function getCar()
+	local char = plr.Character
+	if not char then return nil end
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	if not hum or not hum.SeatPart then return nil end
+
+	local car = hum.SeatPart:FindFirstAncestorOfClass("Model")
+	if not car then return nil end
+
+	if not car.PrimaryPart then
+		local body = car:FindFirstChild("Body")
+		if body then
+			local w = body:FindFirstChild("#Weight")
+			if w then car.PrimaryPart = w end
+		end
+	end
+
+	return car
+end
+
+--====================================================
+-- STREAMING
+--====================================================
+local function streamAround(pos)
+	pcall(function()
+		plr:RequestStreamAroundAsync(pos, 3)
+	end)
+end
+
+--====================================================
+-- TWEEN MOVE (HYBRID)
+--====================================================
+local function moveTo(car, targetCF)
+	if State.Tween then
+		State.Tween:Cancel()
+		State.Tween = nil
+	end
+
+	local root = plr.Character.HumanoidRootPart
+	local dist = (root.Position - targetCF.Position).Magnitude
+	local time = dist / State.Speed
+
+	local value = Instance.new("CFrameValue")
+	value.Value = car:GetPivot()
+
+	value.Changed:Connect(function(cf)
+		local pos = cf.Position
+		State.Ground.Position = pos - Vector3.new(0,14,0)
+		car:PivotTo(CFrame.new(
+			State.Ground.Position + Vector3.new(0,7,0),
+			targetCF.Position
+		))
+		car.PrimaryPart.AssemblyLinearVelocity =
+			car.PrimaryPart.CFrame.LookVector * State.Speed
+	end)
+
+	State.Tween = TweenService:Create(
+		value,
+		TweenInfo.new(time, Enum.EasingStyle.Linear),
+		{ Value = targetCF }
+	)
+
+	State.Tween:Play()
+	State.Tween.Completed:Wait()
+end
+
+--====================================================
+-- MAIN FARM LOOP
+--====================================================
+task.spawn(function()
+	while true do
+		task.wait()
+		if not State.AutoFarm then continue end
+
+		State.Car = getCar()
+		if not State.Car then continue end
+
+		ensureGround()
+
+		-- contoh route (ganti sesuai map kamu)
+		local points = {
+			CFrame.new(105, -26, 7965),
+			CFrame.new(2751, -26, 3694),
+			CFrame.new(-8821, -26, 2042),
+		}
+
+		for _, cf in ipairs(points) do
+			if not State.AutoFarm then break end
+			streamAround(cf.Position)
+			moveTo(State.Car, cf + Vector3.new(0,5,0))
 		end
 	end
 end)
 
-----------------------------------------------------------------
--- ROOT TAGGING
-----------------------------------------------------------------
-local function tagRoot(part)
-	if part:IsA("BasePart") then
-		CollectionSvc:AddTag(part, ROOT_TAG)
-	end
-end
-
-for _, obj in ipairs(workspace:GetDescendants()) do
-	if obj:IsA("TouchTransmitter") and obj.Parent and obj.Parent.Name == "Root" then
-		tagRoot(obj.Parent)
-	end
-end
-
-workspace.DescendantAdded:Connect(function(obj)
-	if obj:IsA("TouchTransmitter") and obj.Parent and obj.Parent.Name == "Root" then
-		task.wait()
-		tagRoot(obj.Parent)
-	end
-end)
-
-----------------------------------------------------------------
--- GUI (MINIMAL)
-----------------------------------------------------------------
-local gui = Instance.new("ScreenGui")
-gui.Name = "RootCollectorGUI"
+--====================================================
+-- GUI (LIGHTWEIGHT)
+--====================================================
+local gui = Instance.new("ScreenGui", plr.PlayerGui)
 gui.ResetOnSpawn = false
-gui.Parent = plr:WaitForChild("PlayerGui")
 
 local frame = Instance.new("Frame", gui)
-frame.Size = UDim2.fromScale(0, 0)
-frame.Position = UDim2.fromScale(0.02, 0.2)
-frame.BackgroundColor3 = Color3.fromRGB(20,20,20)
-frame.BackgroundTransparency = 0.15
+frame.Position = UDim2.fromScale(0.02,0.25)
+frame.Size = UDim2.fromOffset(200,120)
+frame.BackgroundColor3 = Color3.fromRGB(25,25,25)
 frame.BorderSizePixel = 0
-frame.AnchorPoint = Vector2.new(0,0)
-
-Instance.new("UICorner", frame).CornerRadius = UDim.new(0,12)
-
-frame:TweenSize(
-	UDim2.fromOffset(180, 70),
-	Enum.EasingDirection.Out,
-	Enum.EasingStyle.Quad,
-	0.4,
-	true
-)
+Instance.new("UICorner", frame).CornerRadius = UDim.new(0,10)
 
 local title = Instance.new("TextLabel", frame)
-title.Size = UDim2.fromScale(1,0.4)
+title.Size = UDim2.fromOffset(200,30)
+title.Text = "Auto Farm"
 title.BackgroundTransparency = 1
-title.Text = "Root Collector"
-title.TextColor3 = Color3.fromRGB(255,255,255)
+title.TextColor3 = Color3.new(1,1,1)
 title.Font = Enum.Font.GothamBold
 title.TextSize = 14
 
 local toggle = Instance.new("TextButton", frame)
-toggle.Position = UDim2.fromScale(0.1,0.5)
-toggle.Size = UDim2.fromScale(0.8,0.35)
-toggle.Text = "ON"
+toggle.Position = UDim2.fromOffset(20,40)
+toggle.Size = UDim2.fromOffset(160,30)
+toggle.Text = "OFF"
+toggle.BackgroundColor3 = Color3.fromRGB(170,0,0)
+toggle.TextColor3 = Color3.new(1,1,1)
 toggle.Font = Enum.Font.Gotham
 toggle.TextSize = 14
-toggle.TextColor3 = Color3.new(1,1,1)
-toggle.BackgroundColor3 = Color3.fromRGB(0,170,0)
-toggle.BorderSizePixel = 0
-Instance.new("UICorner", toggle).CornerRadius = UDim.new(0,8)
+Instance.new("UICorner", toggle)
 
 toggle.MouseButton1Click:Connect(function()
-	enabled = not enabled
-	toggle.Text = enabled and "ON" or "OFF"
-	toggle.BackgroundColor3 = enabled
-		and Color3.fromRGB(0,170,0)
+	State.AutoFarm = not State.AutoFarm
+	toggle.Text = State.AutoFarm and "ON" or "OFF"
+	toggle.BackgroundColor3 =
+		State.AutoFarm and Color3.fromRGB(0,170,0)
 		or Color3.fromRGB(170,0,0)
 
-	if not enabled and currentTween then
-		currentTween:Cancel()
-		currentTween = nil
+	if not State.AutoFarm and State.Tween then
+		State.Tween:Cancel()
 	end
 end)
-
-----------------------------------------------------------------
--- MAIN LOOP
-----------------------------------------------------------------
-task.spawn(function()
-	while task.wait(CHECK_INTERVAL) do
-		if not enabled then continue end
-		if hum.Health <= 0 then break end
-
-		if not car then
-			car = getVehicle()
-			continue
-		end
-
-		local myPos = root.Position
-		local closest, dist = nil, math.huge
-
-		for _, part in ipairs(CollectionSvc:GetTagged(ROOT_TAG)) do
-			if part and part.Parent and not collected[part] then
-				local d = (myPos - part.Position).Magnitude
-				if d < dist then
-					dist = d
-					closest = part
-				end
-			end
-		end
-
-		if closest and dist > MIN_DISTANCE then
-			collected[closest] = true
-
-			closest.AncestryChanged:Once(function(_, parent)
-				if not parent then
-					collected[closest] = nil
-				end
-			end)
-
-			if currentTween then
-				currentTween:Cancel()
-			end
-
-			local tween = TweenService:Create(
-				car.PrimaryPart,
-				TweenInfo.new(TWEEN_TIME, Enum.EasingStyle.Linear),
-				{ CFrame = closest.CFrame * CFrame.new(0, HEIGHT_OFFSET, 0) }
-			)
-
-			currentTween = tween
-			tween:Play()
-		end
-	end
-end)
-
-print("[Root Collector] ACTIVE")
