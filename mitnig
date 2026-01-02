@@ -1,98 +1,187 @@
-       --/---------------------------------\--
-              --//         MADE BY KHLAT          \\--
-             --//   SUPER-FAST PUMPKIN COLLECTOR   \\--
-            --//   IF IT DOSENT WORK JUST MAKE IT   \\--
-           --//    RUN FOR 5 MINUTES IF IT DOSENT    \\--
-          --//     WORK THEN CHANGE CAR TO  GROUP     \\--
-          --//      CAR IF IT DOSENT WORK JUMP OUT      \\--
-        --//       OF THE CAR  (F) AND RELOAD CAR       \\--
-      --/--------------------------------------------------\--
-
-
-
+--// SERVICES
 local Players        = game:GetService("Players")
 local CollectionSvc  = game:GetService("CollectionService")
 local TweenService   = game:GetService("TweenService")
 local RunService     = game:GetService("RunService")
-local plr   = Players.LocalPlayer
-local char  = plr.Character or plr.CharacterAdded:Wait()
-local root  = char:WaitForChild("HumanoidRootPart")
-local hum   = char:WaitForChild("Humanoid")
+
+--// PLAYER
+local plr  = Players.LocalPlayer
+local char = plr.Character or plr.CharacterAdded:Wait()
+local hum  = char:WaitForChild("Humanoid")
+local root = char:WaitForChild("HumanoidRootPart")
+
+--// SETTINGS
+local TWEEN_TIME     = 0.7
+local CHECK_INTERVAL = 0.9
+local MIN_DISTANCE   = 8
+local HEIGHT_OFFSET  = 4
+local ROOT_TAG       = "FastRootTween"
+
+--// STATE
+local car            = nil
+local currentTween   = nil
+local collected      = {}
+local enabled        = true
+
+----------------------------------------------------------------
+-- VEHICLE HANDLING
+----------------------------------------------------------------
 local function getVehicle()
-    if hum.SeatPart then
-        local car = hum.SeatPart.Parent
-        car.PrimaryPart = car.Body:WaitForChild("#Weight")
-        return car
-    end
-    return nil
+	if not hum.SeatPart then return nil end
+	local model = hum.SeatPart:FindFirstAncestorOfClass("Model")
+	if not model then return nil end
+
+	if not model.PrimaryPart then
+		local body = model:FindFirstChild("Body")
+		if not body then return nil end
+
+		local weight = body:FindFirstChild("#Weight")
+		if not weight or not weight:IsA("BasePart") then return nil end
+		model.PrimaryPart = weight
+	end
+
+	return model
 end
--- change the settings if you need (dont edit it if no skill nigga)
-local car = getVehicle()
-local TWEEN_TIME      = 0.7   -- seconds (0.1 = VERY fast, 0.3 = smooth)
-local CHECK_INTERVAL  = 0.9    -- how often we look for a new target
-local MIN_DISTANCE    = 8      -- ignore if already close
-local HEIGHT_OFFSET   = 4      -- how high above Root to stop
-local ROOT_TAG        = "FastRootTween"
-local function tagRoots()
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("TouchTransmitter") and obj.Parent and obj.Parent.Name == "Root" then
-            local part = obj.Parent
-            if part:IsA("BasePart") then
-                CollectionSvc:AddTag(part, ROOT_TAG)
-            end
-        end
-    end
-end
-tagRoots()
-workspace.DescendantAdded:Connect(function(desc)
-    if desc:IsA("TouchTransmitter") and desc.Parent and desc.Parent.Name == "Root" then
-        task.wait()
-        local part = desc.Parent
-        if part:IsA("BasePart") then
-            CollectionSvc:AddTag(part, ROOT_TAG)
-        end
-    end
-end)
-local collected = {} 
-local currentTween = nil
-task.spawn(function()
-    while task.wait(CHECK_INTERVAL) do
-        if not (char and char.Parent and hum.Health > 0) then break end
-        if not car then car = getVehicle() end
-        if not car then continue end
-        local myPos = root.Position
-        local closest, dist = nil, math.huge
-        for _, part in ipairs(CollectionSvc:GetTagged(ROOT_TAG)) do
-            if part and part.Parent and not collected[part] then
-                local d = (myPos - part.Position).Magnitude
-                if d < dist then
-                    dist = d
-                    closest = part
-                end
-            end
-        end
-        if closest and dist > MIN_DISTANCE then
-            collected[closest] = true
-            if currentTween then
-                currentTween:Cancel()
-            end
-            local goal = { CFrame = closest.CFrame * CFrame.new(0, HEIGHT_OFFSET, 0) }
-            local tweenInfo = TweenInfo.new(
-                TWEEN_TIME,
-                Enum.EasingStyle.Linear,
-                Enum.EasingDirection.Out,
-                0,
-                false,
-                0
-            )
-            currentTween = TweenService:Create(car.PrimaryPart, tweenInfo, goal)
-            currentTween:Play()
-            task.spawn(function()
-                currentTween.Completed:Wait()
-            end)
-        end
-    end
+
+hum:GetPropertyChangedSignal("SeatPart"):Connect(function()
+	if not hum.SeatPart then
+		car = nil
+		if currentTween then
+			currentTween:Cancel()
+			currentTween = nil
+		end
+	end
 end)
 
-print("Super-fast TWEEN Root collector ACTIVE! (Time: " .. TWEEN_TIME .. "s
-)")
+----------------------------------------------------------------
+-- ROOT TAGGING
+----------------------------------------------------------------
+local function tagRoot(part)
+	if part:IsA("BasePart") then
+		CollectionSvc:AddTag(part, ROOT_TAG)
+	end
+end
+
+for _, obj in ipairs(workspace:GetDescendants()) do
+	if obj:IsA("TouchTransmitter") and obj.Parent and obj.Parent.Name == "Root" then
+		tagRoot(obj.Parent)
+	end
+end
+
+workspace.DescendantAdded:Connect(function(obj)
+	if obj:IsA("TouchTransmitter") and obj.Parent and obj.Parent.Name == "Root" then
+		task.wait()
+		tagRoot(obj.Parent)
+	end
+end)
+
+----------------------------------------------------------------
+-- GUI (MINIMAL)
+----------------------------------------------------------------
+local gui = Instance.new("ScreenGui")
+gui.Name = "RootCollectorGUI"
+gui.ResetOnSpawn = false
+gui.Parent = plr:WaitForChild("PlayerGui")
+
+local frame = Instance.new("Frame", gui)
+frame.Size = UDim2.fromScale(0, 0)
+frame.Position = UDim2.fromScale(0.02, 0.2)
+frame.BackgroundColor3 = Color3.fromRGB(20,20,20)
+frame.BackgroundTransparency = 0.15
+frame.BorderSizePixel = 0
+frame.AnchorPoint = Vector2.new(0,0)
+
+Instance.new("UICorner", frame).CornerRadius = UDim.new(0,12)
+
+frame:TweenSize(
+	UDim2.fromOffset(180, 70),
+	Enum.EasingDirection.Out,
+	Enum.EasingStyle.Quad,
+	0.4,
+	true
+)
+
+local title = Instance.new("TextLabel", frame)
+title.Size = UDim2.fromScale(1,0.4)
+title.BackgroundTransparency = 1
+title.Text = "Root Collector"
+title.TextColor3 = Color3.fromRGB(255,255,255)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 14
+
+local toggle = Instance.new("TextButton", frame)
+toggle.Position = UDim2.fromScale(0.1,0.5)
+toggle.Size = UDim2.fromScale(0.8,0.35)
+toggle.Text = "ON"
+toggle.Font = Enum.Font.Gotham
+toggle.TextSize = 14
+toggle.TextColor3 = Color3.new(1,1,1)
+toggle.BackgroundColor3 = Color3.fromRGB(0,170,0)
+toggle.BorderSizePixel = 0
+Instance.new("UICorner", toggle).CornerRadius = UDim.new(0,8)
+
+toggle.MouseButton1Click:Connect(function()
+	enabled = not enabled
+	toggle.Text = enabled and "ON" or "OFF"
+	toggle.BackgroundColor3 = enabled
+		and Color3.fromRGB(0,170,0)
+		or Color3.fromRGB(170,0,0)
+
+	if not enabled and currentTween then
+		currentTween:Cancel()
+		currentTween = nil
+	end
+end)
+
+----------------------------------------------------------------
+-- MAIN LOOP
+----------------------------------------------------------------
+task.spawn(function()
+	while task.wait(CHECK_INTERVAL) do
+		if not enabled then continue end
+		if hum.Health <= 0 then break end
+
+		if not car then
+			car = getVehicle()
+			continue
+		end
+
+		local myPos = root.Position
+		local closest, dist = nil, math.huge
+
+		for _, part in ipairs(CollectionSvc:GetTagged(ROOT_TAG)) do
+			if part and part.Parent and not collected[part] then
+				local d = (myPos - part.Position).Magnitude
+				if d < dist then
+					dist = d
+					closest = part
+				end
+			end
+		end
+
+		if closest and dist > MIN_DISTANCE then
+			collected[closest] = true
+
+			closest.AncestryChanged:Once(function(_, parent)
+				if not parent then
+					collected[closest] = nil
+				end
+			end)
+
+			if currentTween then
+				currentTween:Cancel()
+			end
+
+			local tween = TweenService:Create(
+				car.PrimaryPart,
+				TweenInfo.new(TWEEN_TIME, Enum.EasingStyle.Linear),
+				{ CFrame = closest.CFrame * CFrame.new(0, HEIGHT_OFFSET, 0) }
+			)
+
+			currentTween = tween
+			tween:Play()
+		end
+	end
+end)
+
+print("[Root Collector] ACTIVE")
