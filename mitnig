@@ -1,67 +1,60 @@
--- // Midnight Chasers Pro Farm GUI // Grimoire Edition 🧙‍♂️ // -- Full rewrite with smooth GUI & optimizations -- Written for Roblox Lua (Executor compatible)
+-- // Midnight Chasers Mobile Pro Farm GUI // Grimoire Edition 🧙‍♂️ // -- Full rewrite for Mobile Executors (Delta, Arceus X, Codex, Hydrogen) -- Includes smooth Heartbeat tweening + inertia UI dragging
 
---// SERVICES // local Players = game:GetService("Players") local TweenService = game:GetService("TweenService") local ReplicatedStorage = game:GetService("ReplicatedStorage") local RunService = game:GetService("RunService") local LocalPlayer = Players.LocalPlayer
+--// SERVICES // local Players = game:GetService("Players") local TweenService = game:GetService("TweenService") local RunService = game:GetService("RunService") local UserInputService = game:GetService("UserInputService") local LocalPlayer = Players.LocalPlayer
 
---// GLOBAL SETTINGS // getgenv().AutoFarm = false getgenv().AutoDeliver = false getgenv().Speed = 250 getgenv().CancelTween = nil getgenv().GroundPart = nil
+--// GLOBAL SETTINGS // getgenv().AutoFarm = false getgenv().AutoDeliver = false getgenv().Speed = 250 getgenv().CurrentTween = nil getgenv().GroundPart = nil
 
 --// ANTI-AFK // LocalPlayer.Idled:Connect(function() local vu = game:GetService("VirtualUser") vu:CaptureController() vu:ClickButton2(Vector2.new()) end) warn("Anti-AFK Enabled")
 
---// HELPER FUNCTIONS // local function ensureGroundPart() if not getgenv().GroundPart then local ground = Instance.new("Part", workspace) ground.Name = "_AutoFarmGround" ground.Anchored = true ground.Size = Vector3.new(10000, 10, 10000) ground.Position = Vector3.new(0, -50, 0) ground.Color = Color3.fromRGB(20, 20, 20) getgenv().GroundPart = ground end end
+--// HELPER FUNCTIONS // local function ensureGroundPart() if not getgenv().GroundPart then local ground = Instance.new("Part", workspace) ground.Anchored = true ground.Size = Vector3.new(10000, 10, 10000) ground.Position = Vector3.new(0, -50, 0) ground.Color = Color3.fromRGB(20, 20, 20) getgenv().GroundPart = ground end end
 
-local function hideWorkspaceObjects() local folder = ReplicatedStorage:FindFirstChild("mrbackupfolder") or Instance.new("Folder", ReplicatedStorage) folder.Name = "mrbackupfolder" for _, obj in ipairs(workspace:GetChildren()) do if obj:IsA("Model") or obj:IsA("Folder") or obj:IsA("MeshPart") then if not string.find(obj.Name, LocalPlayer.Name) and not string.find(obj.Name, "Gift") and obj.Name ~= "" then obj.Parent = folder end end end end
+-- Custom smooth tween using Heartbeat for mobile stability local function smoothTween(car, targetPos, speed) ensureGroundPart() local start = car.PrimaryPart.Position local distance = (start - targetPos.Position).Magnitude local duration = distance / speed local startTime = tick() local elapsed = 0 local easing = Enum.EasingStyle.Sine
 
-local function restoreWorkspaceObjects() local folder = ReplicatedStorage:FindFirstChild("mrbackupfolder") if folder then for _, v in ipairs(folder:GetChildren()) do v.Parent = workspace task.wait() end end end
+while elapsed < duration do
+    local dt = RunService.Heartbeat:Wait()
+    elapsed = tick() - startTime
+    local alpha = math.clamp(elapsed / duration, 0, 1)
+    -- Sine in-out easing
+    local eased = 0.5 - 0.5 * math.cos(math.pi * alpha)
+    local newPos = start:Lerp(targetPos.Position, eased)
 
---// TWEENING LOGIC // local function tweenToPosition(car, targetPos, speed) ensureGroundPart() local TweenInfoToUse = TweenInfo.new((car.PrimaryPart.Position - targetPos.Position).Magnitude / speed, Enum.EasingStyle.Linear) local CValue = Instance.new("CFrameValue") CValue.Value = car:GetPrimaryPartCFrame()
-
-CValue.Changed:Connect(function()
-    local pos = CValue.Value.Position
-    getgenv().GroundPart.Position = pos - Vector3.new(0, 14, 0)
+    getgenv().GroundPart.Position = newPos - Vector3.new(0, 14, 0)
     car:PivotTo(CFrame.new(getgenv().GroundPart.Position + Vector3.new(0, 7, 0), targetPos.Position))
     car.PrimaryPart.AssemblyLinearVelocity = car.PrimaryPart.CFrame.LookVector * speed
-end)
-
-local Tween = TweenService:Create(CValue, TweenInfoToUse, { Value = targetPos })
-getgenv().CurrentTween = Tween
-Tween:Play()
-repeat task.wait() until Tween.PlaybackState ~= Enum.PlaybackState.Playing
+end
 
 end
 
---// GUI CREATION // local ScreenGui = Instance.new("ScreenGui", LocalPlayer:WaitForChild("PlayerGui")) ScreenGui.Name = "MidnightFarmUI" ScreenGui.ResetOnSpawn = false
+--// UI CREATION (Mobile Friendly) // local guiParent = LocalPlayer:FindFirstChildOfClass("PlayerGui") or game:GetService("CoreGui") local ScreenGui = Instance.new("ScreenGui", guiParent) ScreenGui.Name = "MidnightFarmUI" ScreenGui.ResetOnSpawn = false
 
-local MainFrame = Instance.new("Frame", ScreenGui) MainFrame.Size = UDim2.new(0, 300, 0, 240) MainFrame.Position = UDim2.new(0.5, -150, 0.5, -120) MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 30) MainFrame.BorderSizePixel = 0 MainFrame.Active = true MainFrame.Draggable = true
+local MainFrame = Instance.new("Frame", ScreenGui) MainFrame.Size = UDim2.new(0, 320, 0, 260) MainFrame.Position = UDim2.new(0.5, -160, 0.5, -130) MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 35) MainFrame.BorderSizePixel = 0
 
-local UICorner = Instance.new("UICorner", MainFrame) UICorner.CornerRadius = UDim.new(0, 12)
+local corner = Instance.new("UICorner", MainFrame) corner.CornerRadius = UDim.new(0, 12) local stroke = Instance.new("UIStroke", MainFrame) stroke.Color = Color3.fromRGB(120, 50, 255)
 
-local UIStroke = Instance.new("UIStroke", MainFrame) UIStroke.Thickness = 2 UIStroke.Color = Color3.fromRGB(100, 0, 200)
+local Title = Instance.new("TextLabel", MainFrame) Title.Size = UDim2.new(1, 0, 0, 40) Title.BackgroundTransparency = 1 Title.Text = "🌙 Midnight Chasers" Title.Font = Enum.Font.GothamBold Title.TextColor3 = Color3.fromRGB(190, 160, 255) Title.TextScaled = true
 
-local Title = Instance.new("TextLabel", MainFrame) Title.Size = UDim2.new(1, 0, 0, 40) Title.BackgroundTransparency = 1 Title.Text = "🌙 Midnight Chasers" Title.Font = Enum.Font.GothamBold Title.TextColor3 = Color3.fromRGB(180, 140, 255) Title.TextScaled = true
+local Scroll = Instance.new("ScrollingFrame", MainFrame) Scroll.Size = UDim2.new(1, 0, 1, -40) Scroll.Position = UDim2.new(0, 0, 0, 40) Scroll.CanvasSize = UDim2.new(0, 0, 2, 0) Scroll.ScrollBarThickness = 5 Scroll.BackgroundTransparency = 1
 
-local ScrollingFrame = Instance.new("ScrollingFrame", MainFrame) ScrollingFrame.Size = UDim2.new(1, 0, 1, -40) ScrollingFrame.Position = UDim2.new(0, 0, 0, 40) ScrollingFrame.CanvasSize = UDim2.new(0, 0, 2, 0) ScrollingFrame.ScrollBarThickness = 6 ScrollingFrame.BackgroundTransparency = 1
+-- Inertia-based drag (works for touch) local dragging, dragStart, startPos, velocity = false, nil, nil, Vector2.new(0, 0)
 
-local function createToggle(text, callback) local Btn = Instance.new("TextButton", ScrollingFrame) Btn.Size = UDim2.new(1, -20, 0, 36) Btn.Position = UDim2.new(0, 10, 0, (#ScrollingFrame:GetChildren() - 1) * 40) Btn.Text = text Btn.Font = Enum.Font.Gotham Btn.TextSize = 16 Btn.BackgroundColor3 = Color3.fromRGB(50, 50, 80) Btn.TextColor3 = Color3.fromRGB(255, 255, 255) Btn.AutoButtonColor = true
+local function updateDrag(input) local delta = input.Position - dragStart local newPos = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y) MainFrame.Position = newPos end
 
-local UIC = Instance.new("UICorner", Btn)
-UIC.CornerRadius = UDim.new(0, 10)
+MainFrame.InputBegan:Connect(function(input) if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = true dragStart = input.Position startPos = MainFrame.Position end end)
 
-local On = false
-Btn.MouseButton1Click:Connect(function()
-    On = not On
-    Btn.BackgroundColor3 = On and Color3.fromRGB(100, 0, 200) or Color3.fromRGB(50, 50, 80)
-    callback(On)
-end)
+UserInputService.InputChanged:Connect(function(input) if dragging and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then updateDrag(input) velocity = input.Delta -- record velocity for inertia end end)
 
-end
+UserInputService.InputEnded:Connect(function(input) if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false -- Inertia effect local decay = 0.95 while math.abs(velocity.X) > 1 or math.abs(velocity.Y) > 1 do MainFrame.Position = UDim2.new(MainFrame.Position.X.Scale, MainFrame.Position.X.Offset + velocity.X, MainFrame.Position.Y.Scale, MainFrame.Position.Y.Offset + velocity.Y) velocity *= decay RunService.Heartbeat:Wait() end end end)
 
--- GUI TOGGLES createToggle("Auto Farm", function(state) getgenv().AutoFarm = state if state then hideWorkspaceObjects() else restoreWorkspaceObjects() end end)
+-- Utility for buttons local function createToggle(text, callback) local btn = Instance.new("TextButton", Scroll) btn.Size = UDim2.new(1, -20, 0, 40) btn.Position = UDim2.new(0, 10, 0, (#Scroll:GetChildren() - 1) * 45) btn.BackgroundColor3 = Color3.fromRGB(50, 50, 80) btn.TextColor3 = Color3.new(1, 1, 1) btn.Text = text btn.Font = Enum.Font.Gotham btn.TextSize = 18 local corner = Instance.new("UICorner", btn) local on = false btn.MouseButton1Click:Connect(function() on = not on btn.BackgroundColor3 = on and Color3.fromRGB(100, 0, 200) or Color3.fromRGB(50, 50, 80) callback(on) end) end
 
-createToggle("Auto Deliver", function(state) getgenv().AutoDeliver = state if state then hideWorkspaceObjects() else restoreWorkspaceObjects() end end)
+-- GUI buttons createToggle("Auto Farm", function(state) getgenv().AutoFarm = state end)
 
--- Add speed slider (simple text input) local SpeedBox = Instance.new("TextBox", ScrollingFrame) SpeedBox.PlaceholderText = "Vehicle Speed" SpeedBox.Size = UDim2.new(1, -20, 0, 36) SpeedBox.Position = UDim2.new(0, 10, 0, (#ScrollingFrame:GetChildren() - 1) * 40) SpeedBox.BackgroundColor3 = Color3.fromRGB(40, 40, 60) SpeedBox.TextColor3 = Color3.new(1, 1, 1) SpeedBox.Font = Enum.Font.Gotham SpeedBox.TextSize = 16 SpeedBox.Text = tostring(getgenv().Speed) local BoxCorner = Instance.new("UICorner", SpeedBox)
+createToggle("Auto Deliver", function(state) getgenv().AutoDeliver = state end)
+
+local SpeedBox = Instance.new("TextBox", Scroll) SpeedBox.Size = UDim2.new(1, -20, 0, 40) SpeedBox.Position = UDim2.new(0, 10, 0, (#Scroll:GetChildren() - 1) * 45) SpeedBox.PlaceholderText = "Enter Speed" SpeedBox.Text = tostring(getgenv().Speed) SpeedBox.TextColor3 = Color3.new(1, 1, 1) SpeedBox.BackgroundColor3 = Color3.fromRGB(35, 35, 55) SpeedBox.Font = Enum.Font.Gotham SpeedBox.TextSize = 18 local corner2 = Instance.new("UICorner", SpeedBox)
 
 SpeedBox.FocusLost:Connect(function() local val = tonumber(SpeedBox.Text) if val then getgenv().Speed = val end end)
 
--- UI TOGGLE KEYBIND local UIS = game:GetService("UserInputService") UIS.InputBegan:Connect(function(input) if input.KeyCode == Enum.KeyCode.RightShift then ScreenGui.Enabled = not ScreenGui.Enabled end end)
+-- UI toggle via RightShift UserInputService.InputBegan:Connect(function(input) if input.KeyCode == Enum.KeyCode.RightShift then ScreenGui.Enabled = not ScreenGui.Enabled end end)
 
-warn("🌙 Midnight Chasers GUI Loaded Successfully!")
+warn("🌙 Midnight Chasers Mobile GUI Loaded Smoothly!")
